@@ -9,9 +9,96 @@ Before you begin, ensure you have:
 1. **Maintainer Access** to the GitHub repository
 2. **NuGet API Key** with push permissions for the CycloneDDS.NET package
 3. **Development Environment** with:
-   - .NET 8.0 SDK or later
-   - PowerShell
+   - **.NET 10 SDK** — the code uses C# 13 language features, so building requires it; the produced binaries still target `net8.0`. (The .NET 8 runtime is also handy for running the `net8.0` tests.)
+   - **CMake 3.16+**
+   - **Windows:** PowerShell and Visual Studio 2022 (*C++ Desktop Development* workload) for native compilation.
+   - **Linux:** a C toolchain and `patchelf` — `sudo apt-get install -y cmake build-essential patchelf`.
    - Git command-line tools
+
+## Building & Testing a Multi-Platform Package Locally
+
+The published `CycloneDDS.NET` and `CycloneDDS.NET.DdsMonitor` packages ship native
+assets for **both** `win-x64` and `linux-x64`. Every green CI run already produces
+these as artifacts, so **you rarely need to build them yourself** — the options
+below are ordered easiest first.
+
+> **How the cross-platform package is assembled.** The pack step includes whatever
+> native artifacts are present under `artifacts/native/<rid>/` (Windows-only entries
+> are `Exists`-guarded), so a cross-platform package needs *both* platforms' natives
+> on one pack host. Because the packages bundle the Windows apphost `.exe` launchers
+> for the build-time tools, the final cross-platform pack runs on **Windows**.
+> Packing on Linux is fully supported but yields a `linux-x64`-only package.
+
+CI publishes three artifacts per run: **`nuget-packages`** (the finished
+cross-platform `.nupkg` + `.snupkg`), **`native-win-x64`**, and
+**`native-linux-x64`**. Download them with the GitHub CLI (`gh`, recommended —
+`winget install GitHub.cli` on Windows) or from the Actions run page.
+
+### Option A — Download the finished package from CI (easiest, no build)
+
+```bash
+# Grab the cross-platform packages from the latest green run on main:
+gh run download --repo pjanec/CycloneDds.NET -n nuget-packages -D artifacts/nuget
+build/test-package.sh          # smoke-test them on this OS  (PowerShell: .\build\test-package.ps1)
+```
+
+Then publish `artifacts/nuget/*.nupkg` manually (see *Publishing* below). Run
+`test-package` on both a Windows and a Linux box against the same package before
+publishing.
+
+### Option B — Assemble the package locally without a C++ toolchain
+
+Download **both** natives from CI and pack — no Visual Studio / CMake needed, just
+the .NET 10 SDK:
+
+```powershell
+gh run download --repo pjanec/CycloneDds.NET -n native-win-x64   -D artifacts\native\win-x64
+gh run download --repo pjanec/CycloneDds.NET -n native-linux-x64 -D artifacts\native\linux-x64
+dotnet build CycloneDDS.NET.Core.slnf -c Release
+dotnet pack src\CycloneDDS.Runtime\CycloneDDS.Runtime.csproj      -c Release --no-build -o artifacts\nuget
+dotnet pack tools\DdsMonitor\DdsMonitor.Blazor\DdsMonitor.csproj  -c Release --no-build -o artifacts\nuget
+.\build\test-package.ps1
+```
+
+### Option C — Full local build from source
+
+```powershell
+# Windows (needs VS 2022 C++ workload + CMake): builds win native, downloads linux native, packs both
+.\build\native-win.ps1
+gh run download --repo pjanec/CycloneDds.NET -n native-linux-x64 -D artifacts\native\linux-x64
+.\build\pack.ps1
+.\build\test-package.ps1
+```
+
+```bash
+# Linux (needs cmake/gcc/patchelf): produces a linux-x64-only package, enough to validate the Linux side
+build/native-linux.sh Release
+dotnet build CycloneDDS.NET.Core.slnf -c Release
+dotnet pack src/CycloneDDS.Runtime/CycloneDDS.Runtime.csproj     -c Release --no-build -o artifacts/nuget
+dotnet pack tools/DdsMonitor/DdsMonitor.Blazor/DdsMonitor.csproj -c Release --no-build -o artifacts/nuget
+build/test-package.sh
+```
+
+### The smoke test (`build/test-package.{sh,ps1}`)
+
+Both scripts pick the **newest** package in the feed by write-time (so a cluttered
+`artifacts/nuget` with old builds is fine — do **not** name-sort), then:
+
+1. Consume `CycloneDDS.NET` as a real NuGet **package** via `examples/PackageSmokeTest`
+   — which declares a `[DdsTopic]` (so the packaged code generator + `idlc` run at
+   build time) and does a publish/subscribe round-trip. Expect
+   `[smoke] PASS: round-trip Id=42 ...`.
+2. Install the `ddsmonitor` global tool, confirm it serves HTTP 200 (native loaded),
+   and uninstall it.
+
+```
+build/test-package.sh [FEED_DIR]        # default artifacts/nuget; NO_DDSMON=1 to skip the tool
+.\build\test-package.ps1 [-FeedDir <d>] [-NoDdsMon]
+```
+
+Run the smoke test on **both** a Windows and a Linux box before publishing. Both
+were validated during development — Linux locally + in CI, Windows in the CI
+`build` job.
 
 ## Version Management
 
@@ -133,7 +220,19 @@ Expand-Archive artifacts/nuget/CycloneDDS.NET.1.0.0.nupkg -DestinationPath temp_
 # - ThirdPartyNotices.txt is present
 # - Native binaries are in runtimes/ folder
 # - Build tools are in build/ or buildTransitive/ folder
+# - lib/net8.0/ has *.dll AND matching *.pdb for Runtime, Core and Schema
+#   (SourceLink debugging), and a .snupkg was produced alongside the .nupkg
 ```
+
+**Debugging support (SourceLink).** The package embeds SourceLink so consumers can
+step into the library sources straight from GitHub. Symbols ship two ways: the
+`lib/net8.0/*.pdb` travel inside the `.nupkg` (Visual Studio loads them directly),
+and a `.snupkg` is published to the NuGet symbol server. Verify with the
+[`sourcelink`](https://www.nuget.org/packages/sourcelink) tool, e.g.
+`sourcelink print-urls lib\net8.0\CycloneDDS.Runtime.pdb` should list
+`https://raw.githubusercontent.com/pjanec/CycloneDds.NET/<commit>/...` URLs.
+Publish **both** the `.nupkg` and the `.snupkg` (see below). SourceLink URLs only
+resolve for commits pushed to GitHub, so publish from a CI build on `main`/a tag.
 
 **Key Things to Check:**
 - [ ] Package version is correct (no `-alpha` suffix for stable)
@@ -146,13 +245,42 @@ Expand-Archive artifacts/nuget/CycloneDDS.NET.1.0.0.nupkg -DestinationPath temp_
 
 ## Publishing to NuGet.org
 
-### Option A: Automatic Publishing (CI/CD)
+### Option A: Automatic Publishing (CI/CD) — recommended
 
-If CI is configured to auto-publish on tags:
+CI publishes to NuGet.org automatically when you push a **version tag** (`vX.Y.Z`),
+but only after the cross-platform package has passed the Windows and Linux
+verification jobs. The `publish` job pushes both `CycloneDDS.NET` and
+`CycloneDDS.NET.DdsMonitor` (plus their `.snupkg` symbols).
 
-1. **Wait for CI to complete** after pushing the tag
-2. **Verify on NuGet.org** that the new version appears
-3. **Create a GitHub Release** with release notes
+**One-time setup — store the NuGet API key as a repository secret:**
+
+1. Create an API key at <https://www.nuget.org/account/apikeys> with **"Push new
+   packages and package versions"**. Scope the *Package glob* to `CycloneDDS.NET*`
+   so it covers both packages. (For the very first push of a brand-new package id,
+   a key scoped to *all* packages / your account may be required until the id
+   exists.)
+2. In GitHub: **Repo → Settings → Secrets and variables → Actions → New repository
+   secret**. Name it exactly **`NUGET_API_KEY`** and paste the key. GitHub encrypts
+   it and masks it in logs; the workflow reads it as `secrets.NUGET_API_KEY`. You
+   never commit the key.
+
+**Releasing:**
+
+1. Make sure `main` is green and at the commit you want to ship.
+2. Check the version NBGV will produce for that commit:
+   ```bash
+   nbgv get-version            # e.g. 0.3.2  (dotnet tool install -g nbgv)
+   ```
+   The published version is `version.json` base + git height — the tag name does
+   **not** set it, so name the tag to match (e.g. `v0.3.2`).
+3. **Create a GitHub Release** with tag `vX.Y.Z` targeting that commit (or
+   `git tag v0.3.2 && git push origin v0.3.2`). The tag push runs CI; on success
+   the `publish` job pushes to NuGet.org.
+4. **Verify on NuGet.org** that the new version (and the DdsMonitor tool) appear.
+
+> The tag is added to `publicReleaseRefSpec` in `version.json`, so a tag build gets
+> a clean version (no `-gSHA` prerelease suffix). SourceLink URLs resolve because
+> the tagged commit is on GitHub.
 
 ### Option B: Manual Publishing
 
