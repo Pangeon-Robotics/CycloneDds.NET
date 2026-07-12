@@ -24,14 +24,18 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Src\CycloneDDS.Runtime\CycloneDDS.Runtime.csproj" />
-    <ProjectReference Include="..\..\Src\CycloneDDS.Core\CycloneDDS.Core.csproj" />
+    <ProjectReference Include="..\..\src\CycloneDDS.Runtime\CycloneDDS.Runtime.csproj" />
+    <ProjectReference Include="..\..\src\CycloneDDS.Core\CycloneDDS.Core.csproj" />
     <ProjectReference Include="..\..\src\CycloneDDS.Schema\CycloneDDS.Schema.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- CycloneDDS Native Binaries -->
-    <None Include="..\..\artifacts\native\win-x64\*.dll">
+    <None Include="..\..\artifacts\native\win-x64\*.dll" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>%(Filename)%(Extension)</Link>
+    </None>
+    <None Include="..\..\artifacts\native\linux-x64\**\*" Condition="$([MSBuild]::IsOSPlatform('Linux'))">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>%(Filename)%(Extension)</Link>
     </None>
