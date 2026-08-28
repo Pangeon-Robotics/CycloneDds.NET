@@ -37,7 +37,7 @@ jobs:
           10.0.x
 
     - name: Install native build prerequisites
-      run: sudo apt-get update && sudo apt-get install -y cmake build-essential patchelf
+      run: sudo apt-get update && sudo apt-get install -y cmake build-essential patchelf libssl-dev
 
     - name: Display Tools Versions
       run: |
@@ -93,6 +93,9 @@ jobs:
         dotnet-version: |
           8.0.x
           10.0.x
+    
+    - name: Install OpenSSL (MSYS2)
+      run: pacman -S --noconfirm mingw-w64-x86_64-openssl-devel
 
     - name: Display Tools Versions
       run: |
