@@ -94,8 +94,10 @@ jobs:
           8.0.x
           10.0.x
     
-    - name: Install OpenSSL (MSYS2)
-      run: pacman -S --noconfirm mingw-w64-x86_64-openssl-devel
+    - name: Install OpenSSL
+      run: |
+        echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
+        vcpkg install openssl:x64-windows-static-md
 
     - name: Display Tools Versions
       run: |
