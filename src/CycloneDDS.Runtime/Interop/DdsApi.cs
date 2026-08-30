@@ -395,12 +395,12 @@ namespace CycloneDDS.Runtime.Interop
                 return DDS_INFINITY;
             }
 
-            var ns = seconds.Value * 1_000_000_000.0;
-            if (ns <= 0.0)
+            if (seconds.Value < 0.0 || double.IsNaN(seconds.Value))
             {
-                return 0;
+                throw new ArgumentOutOfRangeException(nameof(seconds), "duration must be >= 0");
             }
 
+            var ns = seconds.Value * 1_000_000_000.0;
             return ns >= DDS_INFINITY ? DDS_INFINITY : (long)ns;
         }
 
