@@ -45,19 +45,19 @@ public sealed class DdsQosAttribute : Attribute
     /// this often; a reader declares it needs samples at least this often. <c>null</c> means
     /// no deadline. A reader's deadline must be &gt;= the writer's or the two will not match.
     /// </summary>
-    public double? Deadline { get; set; } = null;
+    public double Deadline { get; set; } = -1;
 
     /// <summary>
     /// Gets or sets the LIVELINESS lease duration in seconds. A writer that does not assert
     /// liveliness within this window is declared not-alive to its readers. <c>null</c> means
     /// infinite. A reader's lease must be &gt;= the writer's or the two will not match.
     /// </summary>
-    public double? LivelinessLease { get; set; } = null;
+    public double LivelinessLease { get; set; } = -1;
 
     /// <summary>
     /// Gets or sets the LIFESPAN in seconds. Samples older than this are discarded and never
     /// delivered. <c>null</c> means samples never expire. Writer-side only; DDS ignores it on
     /// a reader.
     /// </summary>
-    public double? Lifespan { get; set; } = null;
+    public double Lifespan { get; set; } = -1;
 }

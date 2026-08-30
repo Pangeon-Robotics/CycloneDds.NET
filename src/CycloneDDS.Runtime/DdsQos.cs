@@ -159,9 +159,9 @@ namespace CycloneDDS.Runtime
 				HistoryKind = attribute.HistoryKind,
 				Liveliness = attribute.Liveliness,
 				HistoryDepth = attribute.HistoryDepth,
-				Deadline = attribute.Deadline,
-				LivelinessLease = attribute.LivelinessLease,
-				Lifespan = attribute.Lifespan
+				Deadline = attribute.Deadline < 0 ? null : attribute.Deadline,
+				LivelinessLease = attribute.LivelinessLease < 0 ? null : attribute.LivelinessLease,
+				Lifespan = attribute.Lifespan < 0 ? null : attribute.Lifespan
 			};
 		}
 
