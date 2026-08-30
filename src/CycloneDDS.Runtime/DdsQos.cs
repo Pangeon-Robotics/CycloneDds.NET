@@ -54,7 +54,7 @@ namespace CycloneDDS.Runtime
 		/// only writes on the writer itself. Automatic is also Cyclone's own default, so it is
 		/// only written to the native QoS when it deviates or a lease is set.
 		/// </summary>
-		public DdsLiveliness Liveliness { get; init; } = DdsLiveliness.Automatic;
+		public DdsLiveliness? Liveliness { get; init; } = null;
 
 		/// <summary>
 		/// Gets the history depth. Only used when <see cref="HistoryKind"/> is KeepLast.
@@ -94,6 +94,7 @@ namespace CycloneDDS.Runtime
 			Reliability = DdsReliability.Reliable,
 			Durability = DdsDurability.Volatile,
 			HistoryKind = DdsHistoryKind.KeepLast,
+			Liveliness = DdsLiveliness.Automatic,
 			HistoryDepth = 1,
 		};
 
@@ -219,7 +220,7 @@ namespace CycloneDDS.Runtime
 					DdsApi.dds_qset_lifespan(qos, DdsApi.Duration(Lifespan));
 				}
 
-				if (Liveliness != DdsLiveliness.Automatic || LivelinessLease.HasValue)
+				if (Liveliness.HasValue)
 				{
 					DdsApi.dds_qset_liveliness(qos, (int)Liveliness, DdsApi.Duration(LivelinessLease));
 				}
