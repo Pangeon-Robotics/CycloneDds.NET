@@ -12,7 +12,7 @@ namespace CycloneDDS.Runtime
         private readonly uint _domainId;
         private readonly string? _defaultPartition;
         private bool _disposed;
-        
+
         private readonly Dictionary<string, DdsApi.DdsEntity> _topicCache = new();
         private readonly object _topicLock = new();
         // Track unmanaged resources for topics so we can free them on Dispose
@@ -39,17 +39,17 @@ namespace CycloneDDS.Runtime
                     DdsApi.DdsReturnCode err = (DdsApi.DdsReturnCode)handleVal;
                     throw new DdsException(err, "Failed to create participant");
                 }
-                
+
                 throw new DdsException(DdsApi.DdsReturnCode.Error, "Failed to create participant (Invalid Handle)");
             }
-            
+
             _handle = new DdsEntityHandle(entity);
         }
 
         public uint DomainId => _domainId;
 
         public string? DefaultPartition => _defaultPartition;
-        
+
         public bool IsDisposed => _disposed;
 
         internal DdsApi.DdsEntity NativeEntity
@@ -63,7 +63,7 @@ namespace CycloneDDS.Runtime
                 return _handle.NativeHandle;
             }
         }
-        
+
         internal DdsEntityHandle HandleWrapper
         {
             get
@@ -121,14 +121,14 @@ namespace CycloneDDS.Runtime
                 {
                     return existing;
                 }
-                
+
                 // 1. Get descriptor ops from static method (via reflection)
                 uint[] ops = DdsTypeSupport.GetDescriptorOps<T>();
                 DdsKeyDescriptor[] keys = DdsTypeSupport.GetKeyDescriptors<T>();
-                
+
                 // 2. Marshal descriptor to native
                 IntPtr descriptorPtr = MarshalDescriptor<T>(ops, keys, DdsTypeSupport.GetTypeName<T>());
-                
+
                 // 3. Create native topic
                 DdsApi.DdsEntity topic = DdsApi.dds_create_topic(
                     NativeEntity,
@@ -136,13 +136,13 @@ namespace CycloneDDS.Runtime
                     topicName,
                     qos,
                     IntPtr.Zero);
-                
+
                 if (!topic.IsValid)
                 {
-                    throw new DdsException(DdsApi.DdsReturnCode.Error, 
+                    throw new DdsException(DdsApi.DdsReturnCode.Error,
                         $"Failed to create topic '{topicName}' for type '{DdsTypeSupport.GetTypeName<T>()}'");
                 }
-                
+
                 // 4. Cache and return
                 _topicCache[topicName] = topic;
                 return topic;
@@ -240,19 +240,19 @@ namespace CycloneDDS.Runtime
                 foreach (var part in parts)
                 {
                     // Find the field in the current type
-                    var field = currentType.GetField(part, 
-                        System.Reflection.BindingFlags.Instance | 
-                        System.Reflection.BindingFlags.Public | 
-                        System.Reflection.BindingFlags.NonPublic | 
+                    var field = currentType.GetField(part,
+                        System.Reflection.BindingFlags.Instance |
+                        System.Reflection.BindingFlags.Public |
+                        System.Reflection.BindingFlags.NonPublic |
                         System.Reflection.BindingFlags.IgnoreCase);
 
                     if (field == null)
                     {
-                         // Try backing field for property? <Name>k__BackingField
-                         field = currentType.GetField($"<{part}>k__BackingField", 
-                            System.Reflection.BindingFlags.Instance | 
-                            System.Reflection.BindingFlags.NonPublic |
-                            System.Reflection.BindingFlags.IgnoreCase);
+                        // Try backing field for property? <Name>k__BackingField
+                        field = currentType.GetField($"<{part}>k__BackingField",
+                           System.Reflection.BindingFlags.Instance |
+                           System.Reflection.BindingFlags.NonPublic |
+                           System.Reflection.BindingFlags.IgnoreCase);
                     }
 
                     if (field == null)
@@ -263,14 +263,14 @@ namespace CycloneDDS.Runtime
                     // Add the offset of this field within its parent
                     // Note: Marshal.OffsetOf requires exact case match of the field definition
                     totalOffset += Marshal.OffsetOf(currentType, field.Name).ToInt32();
-                    
+
                     // Drill down
                     currentType = field.FieldType;
                 }
 
                 return totalOffset;
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
                 Console.WriteLine($"Error calculating recursive offset for {keyPath} in {type.Name}: {ex}");
                 throw;
@@ -280,17 +280,19 @@ namespace CycloneDDS.Runtime
         private static uint GetAlignment(Type type)
         {
             // Try to get generated alignment first
-            try {
+            try
+            {
                 var alignMethod = type.GetMethod("GetDescriptorAlign", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
                 if (alignMethod != null)
                 {
                     return (uint)alignMethod.Invoke(null, null)!;
                 }
-            } catch {}
+            }
+            catch { }
 
             if (type.StructLayoutAttribute != null && type.StructLayoutAttribute.Pack != 0)
                 return (uint)type.StructLayoutAttribute.Pack;
-            
+
             return (uint)IntPtr.Size; // Default to machine word size (8 on x64)
         }
 
@@ -298,10 +300,10 @@ namespace CycloneDDS.Runtime
         {
             // Marshal type name
             IntPtr typeNamePtr = Marshal.StringToHGlobalAnsi(typeName);
-            
+
             // Pin ops array
             GCHandle opsHandle = GCHandle.Alloc(ops, GCHandleType.Pinned);
-            
+
             // Handle keys
             IntPtr keysPtr = IntPtr.Zero;
             uint nkeys = 0;
@@ -310,41 +312,42 @@ namespace CycloneDDS.Runtime
             // if (false) // Diagnostic: Disable keys to check for crash
             if (keys != null && keys.Length > 0)
             {
-                 int nativeKeySize = Marshal.SizeOf<DdsKeyDescriptorNative>();
-                 keysPtr = Marshal.AllocHGlobal(nativeKeySize * keys.Length);
-                 
-                 keyNamePtrs = new IntPtr[keys.Length];
+                int nativeKeySize = Marshal.SizeOf<DdsKeyDescriptorNative>();
+                keysPtr = Marshal.AllocHGlobal(nativeKeySize * keys.Length);
 
-                 for(int i=0; i<keys.Length; i++)
-                 {
-                     var nativeKey = new DdsKeyDescriptorNative();
-                     nativeKey.Name = Marshal.StringToHGlobalAnsi(keys[i].Name);
-                     keyNamePtrs[i] = nativeKey.Name;
-                     nativeKey.Index = keys[i].Index;
+                keyNamePtrs = new IntPtr[keys.Length];
 
-                     if (keys[i].Offset == 0)
-                     {
-                         // Use recursive/smart offset calculation for all keys (handles dot notation and case mismatch)
-                         nativeKey.Offset = (uint)GetRecursiveOffset(typeof(T), keys[i].Name);
-                     }
-                     else
-                     {
-                         nativeKey.Offset = keys[i].Offset;
-                     }
-                     
-                     IntPtr itemPtr = IntPtr.Add(keysPtr, i * nativeKeySize);
-                     Marshal.StructureToPtr(nativeKey, itemPtr, false);
-                 }
-                 
-                 nkeys = (uint)keys.Length;
+                for (int i = 0; i < keys.Length; i++)
+                {
+                    var nativeKey = new DdsKeyDescriptorNative();
+                    nativeKey.Name = Marshal.StringToHGlobalAnsi(keys[i].Name);
+                    keyNamePtrs[i] = nativeKey.Name;
+                    nativeKey.Index = keys[i].Index;
+
+                    if (keys[i].Offset == 0)
+                    {
+                        // Use recursive/smart offset calculation for all keys (handles dot notation and case mismatch)
+                        nativeKey.Offset = (uint)GetRecursiveOffset(typeof(T), keys[i].Name);
+                    }
+                    else
+                    {
+                        nativeKey.Offset = keys[i].Offset;
+                    }
+
+                    IntPtr itemPtr = IntPtr.Add(keysPtr, i * nativeKeySize);
+                    Marshal.StructureToPtr(nativeKey, itemPtr, false);
+                }
+
+                nkeys = (uint)keys.Length;
             }
-            
+
             // Create descriptor struct
             uint flagset = 0;
             uint sampleSize = 0;
             uint align = 0;
 
-            try {
+            try
+            {
                 var flagsMethod = typeof(T).GetMethod("GetDescriptorFlagset", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
                 if (flagsMethod != null) flagset = (uint)flagsMethod.Invoke(null, null)!;
 
@@ -353,11 +356,14 @@ namespace CycloneDDS.Runtime
 
                 var alignMethod = typeof(T).GetMethod("GetDescriptorAlign", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
                 if (alignMethod != null) align = (uint)alignMethod.Invoke(null, null)!;
-            } catch {}
+            }
+            catch { }
 
             // Fallback for Size if not generated (for backward compat)
-            if (sampleSize == 0) {
-                try {
+            if (sampleSize == 0)
+            {
+                try
+                {
                     // WARNING: This is dangerous for types with arrays/strings!
                     // Prefer 0 (let middleware guess) or a safe large default if strict size unknown?
                     // CycloneDDS treats 0 as "unknown/let me handle it" for some types, 
@@ -366,21 +372,24 @@ namespace CycloneDDS.Runtime
                     // but terrible for arrays. 
                     // Ideally, we always regenerate code.
                     sampleSize = (uint)Marshal.SizeOf<T>();
-                } catch {
+                }
+                catch
+                {
                     sampleSize = 4096; // Fallback to avoid 0 size error
                 }
             }
 
             // Fallback for Align
-            if (align == 0) {
+            if (align == 0)
+            {
                 align = GetAlignment(typeof(T));
             }
 
             var desc = new DdsTopicDescriptor
             {
-                m_size = sampleSize, 
-                m_align = align, 
-                m_flagset = flagset, 
+                m_size = sampleSize,
+                m_align = align,
+                m_flagset = flagset,
                 m_nkeys = nkeys,
                 m_typename = typeNamePtr,
                 m_keys = keysPtr,
@@ -485,14 +494,7 @@ namespace CycloneDDS.Runtime
                 ComputerIP = _identityConfig.ComputerIP ?? CycloneDdsXmlConfig.NetworkInterfaceAddress ?? string.Empty
             };
 
-            // QoS: Reliable + TransientLocal
-            IntPtr qos = DdsApi.dds_create_qos();
-            DdsApi.dds_qset_durability(qos, DdsApi.DDS_DURABILITY_TRANSIENT_LOCAL);
-            DdsApi.dds_qset_reliability(qos, DdsApi.DDS_RELIABILITY_RELIABLE, 100_000_000);
-
-            _identityWriter = new DdsWriter<SenderIdentity>(this, "__FcdcSenderIdentity", qos);
-            DdsApi.dds_delete_qos(qos);
-
+            _identityWriter = new DdsWriter<SenderIdentity>(this, "__FcdcSenderIdentity", DdsQos.Latched);
             _identityWriter.Write(identity);
         }
 
