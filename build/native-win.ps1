@@ -62,9 +62,9 @@ try {
         "-DBUILD_IDLC=ON",
         "-DBUILD_TESTING=OFF",
         "-DBUILD_EXAMPLES=OFF",
-        "-DENABLE_SSL=OFF",
+        "-DENABLE_SSL=ON",
         "-DENABLE_SHM=OFF",
-        "-DENABLE_SECURITY=OFF"
+        "-DENABLE_SECURITY=ON"
     )
 
     foreach ($gen in $cmakeGenerators) {

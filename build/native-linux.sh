@@ -60,9 +60,9 @@ cmake -S "$SOURCE_DIR" -B "$BUILD_DIR" \
     -DBUILD_IDLC=ON \
     -DBUILD_TESTING=OFF \
     -DBUILD_EXAMPLES=OFF \
-    -DENABLE_SSL=OFF \
+    -DENABLE_SSL=ON \
     -DENABLE_SHM=OFF \
-    -DENABLE_SECURITY=OFF
+    -DENABLE_SECURITY=ON
 
 # ----------------------------------------------------------------
 # [2/3] Build & Install
