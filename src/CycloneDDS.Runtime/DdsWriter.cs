@@ -179,6 +179,18 @@ namespace CycloneDDS.Runtime
         }
 
         /// <summary>
+        /// Asserts the liveliness of this writer, even if no data has been written to it.
+        /// No effect unless Liveliness is set to ManualByTopic.
+        /// </summary>
+        /// <returns>True on success, false on failure.</returns>
+        public bool AssertLiveliness()
+        {
+            if (_writerHandle == null) throw new ObjectDisposedException(nameof(DdsWriter<T>));
+
+            return DdsApi.dds_assert_liveliness(_writerHandle.NativeHandle.Handle) == (int)DdsApi.DdsReturnCode.Ok;
+        }
+
+        /// <summary>
         /// Dispose an instance.
         /// Marks the instance as NOT_ALIVE_DISPOSED in the reader.
         /// </summary>

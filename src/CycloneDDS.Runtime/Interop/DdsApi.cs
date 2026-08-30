@@ -337,6 +337,9 @@ namespace CycloneDDS.Runtime.Interop
             [In, Out] IntPtr[] samples,
             int count);
 
+        [DllImport(DLL_NAME)]
+        public static extern int dds_assert_liveliness(int entity);
+
         // QoS Management
         [DllImport(DLL_NAME)]
         public static extern IntPtr dds_create_qos();
