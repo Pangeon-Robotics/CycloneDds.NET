@@ -20,13 +20,8 @@ namespace CycloneDDS.Runtime.Tests
                 _participant = new DdsParticipant();
                 var topicName = "ManagedCopyTests_Topic_" + Guid.NewGuid();
                 
-                var qos = DdsApi.dds_create_qos();
-                DdsApi.dds_qset_history(qos, DdsApi.DDS_HISTORY_KEEP_ALL, 0);
-
-                _writer = new DdsWriter<TestMessage>(_participant, topicName, qos);
-                _reader = new DdsReader<TestMessage>(_participant, topicName, qos);
-                
-                DdsApi.dds_delete_qos(qos);
+                _writer = new DdsWriter<TestMessage>(_participant, topicName, DdsQos.KeepAll);
+                _reader = new DdsReader<TestMessage>(_participant, topicName, DdsQos.KeepAll);
             }
             catch(Exception)
             {

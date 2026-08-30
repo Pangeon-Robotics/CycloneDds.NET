@@ -27,12 +27,8 @@ namespace CycloneDDS.Runtime.Tests
         public void Filter_Applied_OnlyMatchingSamples()
         {
              // Use History to ensure writer doesn't overwrite
-             var qos = DdsApi.dds_create_qos();
-             DdsApi.dds_qset_history(qos, DdsApi.DDS_HISTORY_KEEP_ALL, 0);
-
-             using var reader = new DdsReader<TestMessage>(_participant, _topicName, qos);
-             using var writer = new DdsWriter<TestMessage>(_participant, _topicName, qos);
-             DdsApi.dds_delete_qos(qos);
+             using var reader = new DdsReader<TestMessage>(_participant, _topicName, DdsQos.KeepAll);
+             using var writer = new DdsWriter<TestMessage>(_participant, _topicName, DdsQos.KeepAll);
 
              // Write 1, 5, 10
              writer.Write(new TestMessage { Id = 1, Value = 1 });
@@ -63,12 +59,8 @@ namespace CycloneDDS.Runtime.Tests
         [Fact]
         public void Filter_UpdatedAtRuntime_NewFilterApplied()
         {
-             var qos = DdsApi.dds_create_qos();
-             DdsApi.dds_qset_history(qos, DdsApi.DDS_HISTORY_KEEP_ALL, 0);
-
-             using var reader = new DdsReader<TestMessage>(_participant, _topicName, qos);
-             using var writer = new DdsWriter<TestMessage>(_participant, _topicName, qos);
-             DdsApi.dds_delete_qos(qos);
+             using var reader = new DdsReader<TestMessage>(_participant, _topicName, DdsQos.KeepAll);
+             using var writer = new DdsWriter<TestMessage>(_participant, _topicName, DdsQos.KeepAll);
 
              // Batch 1
              writer.Write(new TestMessage { Value = 1 });
@@ -108,12 +100,8 @@ namespace CycloneDDS.Runtime.Tests
         [Fact]
         public void Filter_Null_AllSamplesReturned()
         {
-             var qos = DdsApi.dds_create_qos();
-             DdsApi.dds_qset_history(qos, DdsApi.DDS_HISTORY_KEEP_ALL, 0);
-
-             using var reader = new DdsReader<TestMessage>(_participant, _topicName, qos);
-             using var writer = new DdsWriter<TestMessage>(_participant, _topicName, qos);
-             DdsApi.dds_delete_qos(qos);
+             using var reader = new DdsReader<TestMessage>(_participant, _topicName, DdsQos.KeepAll);
+             using var writer = new DdsWriter<TestMessage>(_participant, _topicName, DdsQos.KeepAll);
 
              // Set Filter "False"
              reader.SetFilter(v => false);
