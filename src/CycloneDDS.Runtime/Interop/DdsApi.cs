@@ -14,9 +14,9 @@ namespace CycloneDDS.Runtime.Interop
         {
             public int Handle;
             public bool IsValid => Handle > 0;
-            
+
             public static readonly DdsEntity Null = new DdsEntity { Handle = 0 };
-            
+
             public override string ToString() => $"DdsEntity(0x{Handle:x})";
         }
 
@@ -41,7 +41,7 @@ namespace CycloneDDS.Runtime.Interop
             public DdsSampleState SampleState;
             public DdsViewState ViewState;
             public DdsInstanceState InstanceState;
-            public byte ValidData; 
+            public byte ValidData;
             private byte _pad1;
             private byte _pad2;
             private byte _pad3;
@@ -66,7 +66,7 @@ namespace CycloneDDS.Runtime.Interop
         // Listener Delegate
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         public delegate void DdsOnDataAvailable(int reader, IntPtr arg);
-        
+
         // Listener
         [DllImport(DLL_NAME)]
         public static extern IntPtr dds_create_listener(IntPtr arg);
@@ -82,7 +82,7 @@ namespace CycloneDDS.Runtime.Interop
 
         [DllImport(DLL_NAME, EntryPoint = "dds_set_listener")]
         public static extern int dds_writer_set_listener(DdsEntity writer, IntPtr listener);
-        
+
         // Participant
         [DllImport(DLL_NAME)]
         public static extern DdsEntity dds_create_participant(
@@ -106,7 +106,7 @@ namespace CycloneDDS.Runtime.Interop
             DdsEntity topic,
             IntPtr qos,
             IntPtr listener);
-        
+
         // Reader
         [DllImport(DLL_NAME)]
         public static extern DdsEntity dds_create_reader(
@@ -161,17 +161,17 @@ namespace CycloneDDS.Runtime.Interop
         [DllImport(DLL_NAME)]
         public static extern int dds_readcdr(
             int reader, // Changed from DdsEntity to int
-            [In, Out] IntPtr[] samples, 
+            [In, Out] IntPtr[] samples,
             uint maxs,
-            [In, Out] DdsSampleInfo[] infos, 
+            [In, Out] DdsSampleInfo[] infos,
             uint mask);
 
         [DllImport(DLL_NAME)]
         public static extern int dds_takecdr(
             int reader, // Changed from DdsEntity to int
-            [In, Out] IntPtr[] samples, 
+            [In, Out] IntPtr[] samples,
             uint maxs,
-            [In, Out] DdsSampleInfo[] infos, 
+            [In, Out] DdsSampleInfo[] infos,
             uint mask);
 
         [DllImport(DLL_NAME)]
@@ -183,35 +183,35 @@ namespace CycloneDDS.Runtime.Interop
         [DllImport(DLL_NAME)]
         public static extern int dds_takecdr_instance(
             int reader,
-            [In, Out] IntPtr[] samples, 
+            [In, Out] IntPtr[] samples,
             uint maxs,
-            [In, Out] DdsSampleInfo[] infos, 
+            [In, Out] DdsSampleInfo[] infos,
             long handle,
             uint mask);
 
         [DllImport(DLL_NAME)]
         public static extern int dds_readcdr_instance(
             int reader,
-            [In, Out] IntPtr[] samples, 
+            [In, Out] IntPtr[] samples,
             uint maxs,
-            [In, Out] DdsSampleInfo[] infos, 
+            [In, Out] DdsSampleInfo[] infos,
             long handle,
             uint mask);
 
         [DllImport(DLL_NAME, EntryPoint = "dds_takecdr")]
         public static extern int dds_takecdr_raw(
-            int reader, 
-            IntPtr samples, 
+            int reader,
+            IntPtr samples,
             uint maxs,
-            IntPtr infos, 
+            IntPtr infos,
             uint mask);
 
         [DllImport(DLL_NAME, EntryPoint = "dds_takecdr")]
         public static extern unsafe int dds_takecdr_ptr(
             int reader, // Changed from DdsEntity to int
-            IntPtr* samples, 
+            IntPtr* samples,
             uint maxs,
-            DdsSampleInfo* infos, 
+            DdsSampleInfo* infos,
             uint mask);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -264,7 +264,7 @@ namespace CycloneDDS.Runtime.Interop
                 iov_base = data,
                 iov_len = (UIntPtr)size
             };
-            
+
             return ddsi_serdata_from_ser_iov(sertype, kind, 1, new[] { iov }, (UIntPtr)size);
         }
 
@@ -279,7 +279,7 @@ namespace CycloneDDS.Runtime.Interop
         [DllImport(DLL_NAME)]
         public static extern int dds_read(
             int reader,
-            [In, Out] IntPtr[] samples, 
+            [In, Out] IntPtr[] samples,
             [In, Out] DdsSampleInfo[] infos,
             UIntPtr bufsz,
             uint maxs);
@@ -287,15 +287,15 @@ namespace CycloneDDS.Runtime.Interop
         [DllImport(DLL_NAME)]
         public static extern int dds_take(
             int reader, // Changed to int to match others
-            [In, Out] IntPtr[] samples, 
+            [In, Out] IntPtr[] samples,
             [In, Out] DdsSampleInfo[] infos,
             UIntPtr bufsz,
             uint maxs);
-            
+
         [DllImport(DLL_NAME)]
         public static extern int dds_read_mask(
             int reader,
-            [In, Out] IntPtr[] samples, 
+            [In, Out] IntPtr[] samples,
             [In, Out] DdsSampleInfo[] infos,
             UIntPtr bufsz,
             uint maxs,
@@ -306,7 +306,7 @@ namespace CycloneDDS.Runtime.Interop
         [DllImport(DLL_NAME)]
         public static extern int dds_read_instance(
             int reader,
-            [In, Out] IntPtr[] samples, 
+            [In, Out] IntPtr[] samples,
             [In, Out] DdsSampleInfo[] infos,
             UIntPtr bufsz,
             uint maxs,
@@ -314,8 +314,8 @@ namespace CycloneDDS.Runtime.Interop
 
         [DllImport(DLL_NAME)]
         public static extern int dds_take_instance(
-            int reader, 
-            [In, Out] IntPtr[] samples, 
+            int reader,
+            [In, Out] IntPtr[] samples,
             [In, Out] DdsSampleInfo[] infos,
             UIntPtr bufsz,
             uint maxs,
@@ -323,8 +323,8 @@ namespace CycloneDDS.Runtime.Interop
 
         [DllImport(DLL_NAME)]
         public static extern int dds_take_mask(
-            int reader, 
-            [In, Out] IntPtr[] samples, 
+            int reader,
+            [In, Out] IntPtr[] samples,
             [In, Out] DdsSampleInfo[] infos,
             UIntPtr bufsz,
             uint maxs,
@@ -365,9 +365,41 @@ namespace CycloneDDS.Runtime.Interop
 
         [DllImport(DLL_NAME)]
         public static extern void dds_qset_reliability(IntPtr qos, int kind, long max_blocking_time);
-        
+
         public const int DDS_RELIABILITY_BEST_EFFORT = 0;
         public const int DDS_RELIABILITY_RELIABLE = 1;
+
+        /// <summary>Sets DEADLINE. <paramref name="deadline"/> is a dds_duration_t; see <see cref="Duration"/>.</summary>
+        [DllImport(DLL_NAME)]
+        public static extern void dds_qset_deadline(nint qos, long deadline);
+
+        /// <summary>Sets LIFESPAN. <paramref name="lifespan"/> is a dds_duration_t; see <see cref="Duration"/>.</summary>
+        [DllImport(DLL_NAME)]
+        public static extern void dds_qset_lifespan(nint qos, long lifespan);
+
+        /// <summary>
+        /// Sets LIVELINESS. <paramref name="kind"/> is one of the <c>DDS_LIVELINESS_*</c> constants;
+        /// <paramref name="lease_duration"/> is a dds_duration_t; see <see cref="Duration"/>.
+        /// </summary>
+        [DllImport(DLL_NAME)]
+        public static extern void dds_qset_liveliness(nint qos, int kind, long lease_duration);
+
+        /// <summary>Converts seconds to a dds_duration_t. Null means DDS_INFINITY.</summary>
+        public static long Duration(double? seconds)
+        {
+            if (!seconds.HasValue || double.IsPositiveInfinity(seconds.Value))
+            {
+                return DDS_INFINITY;
+            }
+
+            var ns = seconds.Value * 1_000_000_000.0;
+            if (ns <= 0.0)
+            {
+                return 0;
+            }
+
+            return ns >= DDS_INFINITY ? DDS_INFINITY : (long)ns;
+        }
 
         // Partition QoS
         [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
@@ -401,6 +433,81 @@ namespace CycloneDDS.Runtime.Interop
             public long LastPublicationHandle;
         }
 
+        /// <summary>
+        /// REQUESTED_INCOMPATIBLE_QOS. Mirrors <c>dds_requested_incompatible_qos_status_t</c>:
+        /// a writer was found whose offered QoS does not satisfy this reader's request, so the
+        /// two did not match. <c>LastPolicyId</c> identifies the offending policy.
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct DdsRequestedIncompatibleQosStatus
+        {
+            public uint TotalCount;
+            public int TotalCountChange;
+            public uint LastPolicyId;
+        }
+
+        /// <summary>
+        /// REQUESTED_DEADLINE_MISSED. Mirrors <c>dds_requested_deadline_missed_status_t</c>:
+        /// no sample arrived for an instance within the DEADLINE this reader requested.
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct DdsRequestedDeadlineMissedStatus
+        {
+            public uint TotalCount;
+            public int TotalCountChange;
+            public ulong LastInstanceHandle;
+        }
+
+        /// <summary>
+        /// LIVELINESS_CHANGED. Mirrors <c>dds_liveliness_changed_status_t</c>: how many matched
+        /// writers are currently alive versus not-alive from this reader's point of view.
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct DdsLivelinessChangedStatus
+        {
+            public uint AliveCount;
+            public uint NotAliveCount;
+            public int AliveCountChange;
+            public int NotAliveCountChange;
+            public ulong LastPublicationHandle;
+        }
+
+        /// <summary>
+        /// OFFERED_INCOMPATIBLE_QOS. Mirrors <c>dds_offered_incompatible_qos_status_t</c>:
+        /// a reader was found whose requested QoS this writer cannot satisfy, so the two did
+        /// not match. <c>LastPolicyId</c> identifies the offending policy.
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct DdsOfferedIncompatibleQosStatus
+        {
+            public uint TotalCount;
+            public int TotalCountChange;
+            public uint LastPolicyId;
+        }
+
+        /// <summary>
+        /// OFFERED_DEADLINE_MISSED. Mirrors <c>dds_offered_deadline_missed_status_t</c>:
+        /// this writer failed to publish an instance within the DEADLINE it committed to.
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct DdsOfferedDeadlineMissedStatus
+        {
+            public uint TotalCount;
+            public int TotalCountChange;
+            public ulong LastInstanceHandle;
+        }
+
+        /// <summary>
+        /// LIVELINESS_LOST. Mirrors <c>dds_liveliness_lost_status_t</c>: this writer failed to
+        /// assert liveliness within its lease duration and was declared not-alive to readers.
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct DdsLivelinessLostStatus
+        {
+            public uint TotalCount;
+            public int TotalCountChange;
+        }
+
         // NOTE: status is passed BY VALUE, matching the C signature
         //   void (*)(dds_entity_t, const dds_..._matched_status_t status, void *arg)
         // These 24-byte structs are >16 bytes, so the Windows x64 ABI passes them by an
@@ -427,9 +534,37 @@ namespace CycloneDDS.Runtime.Interop
 
         [DllImport(DLL_NAME)]
         public extern static int dds_get_subscription_matched_status(int reader, out DdsSubscriptionMatchedStatus status);
-        
+
         [DllImport(DLL_NAME)]
         public extern static int dds_get_status_changes(int entity, out uint status);
+
+        // NOTE: every dds_get_*_status call resets that status's *_change counters as a side
+        // effect, so each call reports only what happened since the previous one. Returns a
+        // dds_return_t; a deleted entity yields DDS_RETCODE_ALREADY_DELETED and a zeroed struct.
+
+        /// <summary>Reads and resets the reader's REQUESTED_INCOMPATIBLE_QOS status.</summary>
+        [DllImport(DLL_NAME)]
+        public static extern int dds_get_requested_incompatible_qos_status(int reader, out DdsRequestedIncompatibleQosStatus status);
+
+        /// <summary>Reads and resets the reader's REQUESTED_DEADLINE_MISSED status.</summary>
+        [DllImport(DLL_NAME)]
+        public static extern int dds_get_requested_deadline_missed_status(int reader, out DdsRequestedDeadlineMissedStatus status);
+
+        /// <summary>Reads and resets the reader's LIVELINESS_CHANGED status.</summary>
+        [DllImport(DLL_NAME)]
+        public static extern int dds_get_liveliness_changed_status(int reader, out DdsLivelinessChangedStatus status);
+
+        /// <summary>Reads and resets the writer's OFFERED_INCOMPATIBLE_QOS status.</summary>
+        [DllImport(DLL_NAME)]
+        public static extern int dds_get_offered_incompatible_qos_status(int writer, out DdsOfferedIncompatibleQosStatus status);
+
+        /// <summary>Reads and resets the writer's OFFERED_DEADLINE_MISSED status.</summary>
+        [DllImport(DLL_NAME)]
+        public static extern int dds_get_offered_deadline_missed_status(int writer, out DdsOfferedDeadlineMissedStatus status);
+
+        /// <summary>Reads and resets the writer's LIVELINESS_LOST status.</summary>
+        [DllImport(DLL_NAME)]
+        public static extern int dds_get_liveliness_lost_status(int writer, out DdsLivelinessLostStatus status);
 
         /// <summary>
         /// Get the GUID of a DDS entity (participant, reader, writer).
@@ -485,7 +620,7 @@ namespace CycloneDDS.Runtime.Interop
         public const uint DDS_DATA_AVAILABLE_STATUS = (1u << 8);
         public const uint DDS_PUBLICATION_MATCHED_STATUS = (1u << 11);
         public const uint DDS_SUBSCRIPTION_MATCHED_STATUS = (1u << 12);
-        
+
         // WaitSet & Conditions
         [DllImport(DLL_NAME)]
         public static extern DdsEntity dds_create_waitset(DdsEntity participant);
