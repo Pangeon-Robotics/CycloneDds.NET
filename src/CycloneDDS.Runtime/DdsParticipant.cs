@@ -116,6 +116,12 @@ namespace CycloneDDS.Runtime
             {
                 if (_disposed) throw new ObjectDisposedException(nameof(DdsParticipant));
 
+                // TODO: The topic cache will effectively shadow the QoS for different endpoints on the same topic name.
+                // Not a problem if only one endpoint is used for a topic name. The cache should allow more granularity
+                // and only return the existing if it's actually the exact same. Alternatively: just remove it. I don't
+                // see why a user would realistically make multiple of the exact same endpoint, nor do I see any other users
+                // of the dictionary except for this block.
+
                 // Check cache first
                 if (_topicCache.TryGetValue(topicName, out var existing))
                 {
