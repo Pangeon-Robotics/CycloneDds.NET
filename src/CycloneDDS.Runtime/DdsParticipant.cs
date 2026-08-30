@@ -13,10 +13,10 @@ namespace CycloneDDS.Runtime
         private readonly string? _defaultPartition;
         private bool _disposed;
 
-        private readonly Dictionary<string, DdsApi.DdsEntity> _topicCache = new();
+        private readonly List<DdsApi.DdsEntity> _topicCache = [];
         private readonly object _topicLock = new();
         // Track unmanaged resources for topics so we can free them on Dispose
-        private readonly List<IDisposable> _topicResources = new();
+        private readonly List<IDisposable> _topicResources = [];
 
         private SenderIdentityConfig? _identityConfig;
         private DdsWriter<SenderIdentity>? _identityWriter;
@@ -83,7 +83,7 @@ namespace CycloneDDS.Runtime
                 lock (_topicLock)
                 {
                     // Delete all cached topics
-                    foreach (var topic in _topicCache.Values)
+                    foreach (var topic in _topicCache)
                     {
                         DdsApi.dds_delete(topic);
                     }
@@ -107,26 +107,13 @@ namespace CycloneDDS.Runtime
         }
 
         /// <summary>
-        /// Get or register a topic for type T.
-        /// Thread-safe. Returns cached topic if already created for this name.
+        /// Register a topic for type T. Thread-safe.
         /// </summary>
-        internal DdsApi.DdsEntity GetOrRegisterTopic<T>(string topicName, IntPtr qos = default)
+        internal DdsApi.DdsEntity RegisterTopic<T>(string topicName, IntPtr qos = default)
         {
             lock (_topicLock)
             {
-                if (_disposed) throw new ObjectDisposedException(nameof(DdsParticipant));
-
-                // TODO: The topic cache will effectively shadow the QoS for different endpoints on the same topic name.
-                // Not a problem if only one endpoint is used for a topic name. The cache should allow more granularity
-                // and only return the existing if it's actually the exact same. Alternatively: just remove it. I don't
-                // see why a user would realistically make multiple of the exact same endpoint, nor do I see any other users
-                // of the dictionary except for this block.
-
-                // Check cache first
-                if (_topicCache.TryGetValue(topicName, out var existing))
-                {
-                    return existing;
-                }
+                ObjectDisposedException.ThrowIf(_disposed, this);
 
                 // 1. Get descriptor ops from static method (via reflection)
                 uint[] ops = DdsTypeSupport.GetDescriptorOps<T>();
@@ -149,8 +136,7 @@ namespace CycloneDDS.Runtime
                         $"Failed to create topic '{topicName}' for type '{DdsTypeSupport.GetTypeName<T>()}'");
                 }
 
-                // 4. Cache and return
-                _topicCache[topicName] = topic;
+                _topicCache.Add(topic);
                 return topic;
             }
         }
