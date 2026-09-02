@@ -32,17 +32,11 @@ namespace CycloneDDS.Runtime.Tracking
         internal SenderRegistry(DdsParticipant participant)
         {
             _participant = participant;
-            
-            // QoS: Reliable + TransientLocal
-            IntPtr qos = DdsApi.dds_create_qos();
-            DdsApi.dds_qset_durability(qos, DdsApi.DDS_DURABILITY_TRANSIENT_LOCAL);
-            DdsApi.dds_qset_reliability(qos, DdsApi.DDS_RELIABILITY_RELIABLE, 100_000_000);
+
 
             // Subscribe to identity announcements
             _identityReader = new DdsReader<SenderIdentity>(
-                participant, "__FcdcSenderIdentity", qos);
-            
-            DdsApi.dds_delete_qos(qos);
+                participant, "__FcdcSenderIdentity", DdsQos.Latched);
 
             // Start async monitoring
             _monitorTask = MonitorIdentitiesAsync();
@@ -63,8 +57,8 @@ namespace CycloneDDS.Runtime.Tracking
                     }
                 }
             }
-            catch (OperationCanceledException) 
-            { 
+            catch (OperationCanceledException)
+            {
                 // Expected on dispose 
             }
             catch (Exception ex)
@@ -80,7 +74,7 @@ namespace CycloneDDS.Runtime.Tracking
             {
                 var identity = scope[i];
                 _guidToIdentity[identity.ParticipantGuid] = identity;
-                
+
                 // Also retry resolving any pending handles for this participant
                 // (In a real implementation we might want to optimize this)
             }
@@ -131,7 +125,7 @@ namespace CycloneDDS.Runtime.Tracking
                     return true;
                 }
             }
-            
+
             identity = default;
             return false;
         }
@@ -143,19 +137,19 @@ namespace CycloneDDS.Runtime.Tracking
             // On Little Endian, 'Low' contains bytes 8-15.
             // EntityId is bytes 12-15.
             // So EntityId corresponds to the most significant 32 bits of Low.
-            
+
             // Mask out the EntityId (top 32 bits of Low)
             long prefixMask = 0x00000000FFFFFFFF;
-            
+
             // EntityId for Participant: 0x000001c1. In LE byte stream: 00 00 01 C1
             // C1 is at MSB (v[15]).
             // Value: 0xC101000000000000 (unchecked)
-            
+
             long participantEntityId = unchecked((long)0xC101000000000000UL); // 00 00 01 C1 in upper bytes
-            
+
             DdsGuid participantGuid = writerGuid;
             participantGuid.Low = (participantGuid.Low & prefixMask) | participantEntityId;
-            
+
             return participantGuid;
         }
 
@@ -163,12 +157,16 @@ namespace CycloneDDS.Runtime.Tracking
         {
             _cancellation.Cancel();
             _identityReader?.Dispose();
+            // FIXME: the CTS is disposed before _monitorTask is awaited below, so the loop in
+            // MonitorIdentitiesAsync can read _cancellation.Token on a disposed CTS and throw
+            // ObjectDisposedException (the "[SenderRegistry] Monitor task failed" noise in test
+            // runs). Dispose the CTS only after the monitor task has completed.
             _cancellation.Dispose();
-            
+
             // Wait for monitor task to complete (with timeout)
-            try 
-            { 
-                _monitorTask?.Wait(TimeSpan.FromSeconds(1)); 
+            try
+            {
+                _monitorTask?.Wait(TimeSpan.FromSeconds(1));
             }
             catch { /* Best effort */ }
         }

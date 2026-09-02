@@ -32,22 +32,77 @@ namespace CycloneDDS.Runtime.Tests
             Assert.Throws<InvalidOperationException>(() => DdsTypeSupport.GetDescriptorOps<int>());
         }
 
+        /// <summary>
+        /// The topic cache is keyed by (name, type) and reference counted, so two endpoints on
+        /// one name share a single native topic instead of leaking one entity each. The topic
+        /// itself carries no QoS, so sharing it cannot make one endpoint shadow the other's.
+        /// </summary>
         [Fact]
-        public void TopicCache_SameName_ReturnsSameHandle()
+        public void RegisterTopic_SameNameAndType_SharesOneTopic()
         {
-            var topic1 = _participant.GetOrRegisterTopic<TestMessage>("CachedTopic");
-            var topic2 = _participant.GetOrRegisterTopic<TestMessage>("CachedTopic");
-            
+            var topic1 = _participant.RegisterTopic<TestMessage>("CachedTopic");
+            var topic2 = _participant.RegisterTopic<TestMessage>("CachedTopic");
+
+            Assert.True(topic1.IsValid);
             Assert.Equal(topic1.Handle, topic2.Handle);
+
+            _participant.ReleaseTopic<TestMessage>("CachedTopic");
+            _participant.ReleaseTopic<TestMessage>("CachedTopic");
+        }
+
+        /// <summary>
+        /// Once every registration is released the topic is deleted, and a later registration
+        /// builds a fresh one rather than handing back the deleted entity.
+        /// </summary>
+        [Fact]
+        public void RegisterTopic_AfterFullRelease_CreatesFreshTopic()
+        {
+            var topic1 = _participant.RegisterTopic<TestMessage>("RefCountedTopic");
+            _participant.RegisterTopic<TestMessage>("RefCountedTopic");
+
+            // One outstanding registration left: the topic must survive
+            _participant.ReleaseTopic<TestMessage>("RefCountedTopic");
+            var topic2 = _participant.RegisterTopic<TestMessage>("RefCountedTopic");
+            Assert.Equal(topic1.Handle, topic2.Handle);
+
+            _participant.ReleaseTopic<TestMessage>("RefCountedTopic");
+            _participant.ReleaseTopic<TestMessage>("RefCountedTopic");
+
+            var topic3 = _participant.RegisterTopic<TestMessage>("RefCountedTopic");
+            Assert.True(topic3.IsValid);
+
+            _participant.ReleaseTopic<TestMessage>("RefCountedTopic");
+        }
+
+        /// <summary>
+        /// Endpoints hand their registration back on Dispose, so a topic churned through many
+        /// short-lived readers leaves nothing behind.
+        /// </summary>
+        [Fact]
+        public void Endpoints_DisposedRepeatedly_ReleaseTheirTopic()
+        {
+            for (int i = 0; i < 5; i++)
+            {
+                using var reader = new DdsReader<TestMessage>(_participant, "ChurnedTopic");
+                using var writer = new DdsWriter<TestMessage>(_participant, "ChurnedTopic");
+            }
+
+            // Nothing is holding the topic now, so this registration must build a new one
+            var topic = _participant.RegisterTopic<TestMessage>("ChurnedTopic");
+            Assert.True(topic.IsValid);
+            _participant.ReleaseTopic<TestMessage>("ChurnedTopic");
         }
 
         [Fact]
-        public void TopicCache_DifferentNames_CreatesSeparateTopics()
+        public void RegisterTopic_DifferentNames_CreatesSeparateTopics()
         {
-            var topic1 = _participant.GetOrRegisterTopic<TestMessage>("Topic1");
-            var topic2 = _participant.GetOrRegisterTopic<TestMessage>("Topic2");
-            
+            var topic1 = _participant.RegisterTopic<TestMessage>("Topic1");
+            var topic2 = _participant.RegisterTopic<TestMessage>("Topic2");
+
             Assert.NotEqual(topic1.Handle, topic2.Handle);
+
+            _participant.ReleaseTopic<TestMessage>("Topic1");
+            _participant.ReleaseTopic<TestMessage>("Topic2");
         }
 
         [Fact]
