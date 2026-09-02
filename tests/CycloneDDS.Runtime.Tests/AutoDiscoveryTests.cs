@@ -32,21 +32,28 @@ namespace CycloneDDS.Runtime.Tests
             Assert.Throws<InvalidOperationException>(() => DdsTypeSupport.GetDescriptorOps<int>());
         }
 
+        /// <summary>
+        /// There is no topic cache any more: each call creates its own native topic, so two
+        /// endpoints on one name get two handles onto the same underlying ktopic rather than
+        /// sharing one entity — and neither can shadow the other's QoS.
+        /// </summary>
         [Fact]
-        public void TopicCache_SameName_ReturnsSameHandle()
+        public void RegisterTopic_SameName_CreatesSeparateHandles()
         {
-            var topic1 = _participant.GetOrRegisterTopic<TestMessage>("CachedTopic");
-            var topic2 = _participant.GetOrRegisterTopic<TestMessage>("CachedTopic");
-            
-            Assert.Equal(topic1.Handle, topic2.Handle);
+            var topic1 = _participant.RegisterTopic<TestMessage>("CachedTopic");
+            var topic2 = _participant.RegisterTopic<TestMessage>("CachedTopic");
+
+            Assert.True(topic1.IsValid);
+            Assert.True(topic2.IsValid);
+            Assert.NotEqual(topic1.Handle, topic2.Handle);
         }
 
         [Fact]
-        public void TopicCache_DifferentNames_CreatesSeparateTopics()
+        public void RegisterTopic_DifferentNames_CreatesSeparateTopics()
         {
-            var topic1 = _participant.GetOrRegisterTopic<TestMessage>("Topic1");
-            var topic2 = _participant.GetOrRegisterTopic<TestMessage>("Topic2");
-            
+            var topic1 = _participant.RegisterTopic<TestMessage>("Topic1");
+            var topic2 = _participant.RegisterTopic<TestMessage>("Topic2");
+
             Assert.NotEqual(topic1.Handle, topic2.Handle);
         }
 

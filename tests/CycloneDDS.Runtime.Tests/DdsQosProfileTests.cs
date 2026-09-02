@@ -123,7 +123,7 @@ namespace CycloneDDS.Runtime.Tests
             Assert.Null(qos.Deadline);
             Assert.Null(qos.Lifespan);
             Assert.Null(qos.LivelinessLease);
-            Assert.Equal(DdsLiveliness.Automatic, qos.Liveliness);
+            Assert.Null(qos.Liveliness);
         }
 
         [Fact]
@@ -282,7 +282,7 @@ namespace CycloneDDS.Runtime.Tests
         }
 
         [Fact]
-        public void Default_WritesReliabilityDurabilityAndHistory()
+        public void Default_WritesReliabilityDurabilityHistoryAndLiveliness()
         {
             var view = NativeQosView.Of(DdsQos.Default);
 
@@ -296,10 +296,15 @@ namespace CycloneDDS.Runtime.Tests
             Assert.Equal(DdsApi.DDS_HISTORY_KEEP_LAST, view.HistoryKind);
             Assert.Equal(1, view.HistoryDepth);
 
-            // Nothing beyond the four core policies may be written.
+            // Default states its liveliness rather than leaving it to Cyclone, so the policy
+            // is written even though Automatic happens to be Cyclone's own default.
+            Assert.True(view.HasLiveliness);
+            Assert.Equal((int)DdsLiveliness.Automatic, view.LivelinessKind);
+            Assert.Equal(DdsApi.DDS_INFINITY, view.LivelinessLease);
+
+            // Nothing beyond the policies the preset states may be written.
             Assert.False(view.HasDeadline);
             Assert.False(view.HasLifespan);
-            Assert.False(view.HasLiveliness);
         }
 
         [Fact]
@@ -405,15 +410,27 @@ namespace CycloneDDS.Runtime.Tests
         }
 
         /// <summary>
-        /// Automatic with no lease is already Cyclone's own default, so writing it would turn
-        /// a "left alone" profile into an explicit one for no gain.
+        /// Liveliness is nullable, so an explicit Automatic is a stated policy and must be
+        /// written. Leaving it out would let the topic's own LIVELINESS win instead, which is
+        /// the opposite of what the profile asked for.
         /// </summary>
         [Fact]
-        public void Liveliness_AutomaticWithNoLease_IsNotWritten()
+        public void Liveliness_ExplicitAutomaticWithNoLease_IsWritten()
         {
             var view = NativeQosView.Of(DdsQos.SystemDefault with { Liveliness = DdsLiveliness.Automatic });
 
-            Assert.False(view.HasLiveliness);
+            Assert.True(view.HasLiveliness);
+            Assert.Equal((int)DdsLiveliness.Automatic, view.LivelinessKind);
+            Assert.Equal(DdsApi.DDS_INFINITY, view.LivelinessLease);
+        }
+
+        /// <summary>
+        /// A null liveliness, on the other hand, states nothing and must write nothing.
+        /// </summary>
+        [Fact]
+        public void Liveliness_Unset_IsNotWritten()
+        {
+            Assert.False(NativeQosView.Of(DdsQos.SystemDefault).HasLiveliness);
         }
 
         [Fact]
@@ -430,6 +447,21 @@ namespace CycloneDDS.Runtime.Tests
         public void Liveliness_LeaseAlone_IsWrittenWithAutomaticKind()
         {
             var view = NativeQosView.Of(DdsQos.Default with { LivelinessLease = 0.75 });
+
+            Assert.True(view.HasLiveliness);
+            Assert.Equal((int)DdsLiveliness.Automatic, view.LivelinessKind);
+            Assert.Equal(750_000_000L, view.LivelinessLease);
+        }
+
+        /// <summary>
+        /// The same from a profile that states no kind at all. LIVELINESS carries the kind and
+        /// the lease in one policy, so a null kind must not swallow a lease that was asked for
+        /// — Default merely happens to supply Automatic, and cannot be relied on to.
+        /// </summary>
+        [Fact]
+        public void Liveliness_LeaseAloneOnAnOtherwiseUnsetProfile_IsStillWritten()
+        {
+            var view = NativeQosView.Of(DdsQos.SystemDefault with { LivelinessLease = 0.75 });
 
             Assert.True(view.HasLiveliness);
             Assert.Equal((int)DdsLiveliness.Automatic, view.LivelinessKind);
@@ -497,12 +529,23 @@ namespace CycloneDDS.Runtime.Tests
             Assert.Equal(DdsApi.DDS_INFINITY, DdsApi.Duration(double.PositiveInfinity));
         }
 
-        [Theory]
-        [InlineData(0.0)]
-        [InlineData(-1.0)]
-        public void Duration_NonPositiveIsZero(double seconds)
+        [Fact]
+        public void Duration_ZeroIsZero()
         {
-            Assert.Equal(0L, DdsApi.Duration(seconds));
+            Assert.Equal(0L, DdsApi.Duration(0.0));
+        }
+
+        /// <summary>
+        /// A negative or NaN duration has no DDS meaning. Clamping it to zero would turn a
+        /// typo into a lifespan that expires every sample the instant it is written, so it is
+        /// rejected instead.
+        /// </summary>
+        [Theory]
+        [InlineData(-1.0)]
+        [InlineData(double.NaN)]
+        public void Duration_InvalidValueThrows(double seconds)
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => DdsApi.Duration(seconds));
         }
 
         [Fact]
@@ -563,8 +606,9 @@ namespace CycloneDDS.Runtime.Tests
         }
 
         /// <summary>
-        /// The attribute's duration policies are nullable and default to null, so a decorated
-        /// type that says nothing about them must not acquire a deadline or a lifespan.
+        /// The attribute's duration policies carry a negative sentinel when unset, which
+        /// <see cref="DdsQos.FromAttribute"/> projects back to null, so a decorated type that
+        /// says nothing about them must not acquire a deadline or a lifespan.
         /// </summary>
         [Fact]
         public void Attribute_UnsetDurationsStayNull()
@@ -578,7 +622,20 @@ namespace CycloneDDS.Runtime.Tests
             var view = NativeQosView.Of(qos);
             Assert.False(view.HasDeadline);
             Assert.False(view.HasLifespan);
-            Assert.False(view.HasLiveliness);
+        }
+
+        /// <summary>
+        /// Unlike the durations, the attribute's Liveliness has no unset representation: it is
+        /// a non-nullable enum defaulting to Automatic, so every decorated type states the
+        /// policy explicitly whether or not its author meant to.
+        /// </summary>
+        [Fact]
+        public void Attribute_LivelinessIsAlwaysStated()
+        {
+            var qos = DdsQos.FromAttribute(new DdsQosAttribute());
+
+            Assert.Equal(DdsLiveliness.Automatic, qos.Liveliness);
+            Assert.True(NativeQosView.Of(qos).HasLiveliness);
         }
     }
 }

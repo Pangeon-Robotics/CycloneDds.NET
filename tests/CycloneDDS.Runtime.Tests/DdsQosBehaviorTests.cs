@@ -224,20 +224,20 @@ namespace CycloneDDS.Runtime.Tests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // Topic QoS inheritance.
+    // Topic QoS.
     //
-    // DdsParticipant caches one native topic per topic *name* and creates it with the
-    // QoS of whichever endpoint asked for it first. Cyclone then merges that topic QoS
-    // into every later endpoint on the same name for any policy the endpoint itself
-    // left unset (dds_reader.c / dds_writer.c: mergein_missing from tp->m_ktopic->qos,
-    // which runs before the entity defaults). A null policy therefore does not always
-    // mean "Cyclone's default" — it means "the topic's value, and Cyclone's default
-    // only if the topic has none either".
+    // DdsParticipant creates every native topic with Cyclone's default QoS; an endpoint
+    // profile reaches dds_create_reader / dds_create_writer only. Cyclone does merge a
+    // topic's QoS into an endpoint for any policy the endpoint left unset (dds_reader.c /
+    // dds_writer.c: mergein_missing from tp->m_ktopic->qos, which runs before the entity
+    // defaults), but with nothing on the topic there is nothing to merge: a null policy
+    // always means Cyclone's own default, and the effective QoS never depends on the
+    // order the endpoints happened to be constructed in.
     //
-    // These characterise that behaviour rather than endorse it: it makes the effective
-    // QoS depend on entity construction order. They are expected to fail once the TODO
-    // on DdsParticipant.GetOrRegisterTopic is acted on and the cache distinguishes
-    // topics by QoS as well as by name.
+    // Handing the endpoint QoS to dds_create_topic instead would leak policies between
+    // endpoints on a name *and* make the second such endpoint fail outright, since
+    // Cyclone refuses a duplicate ktopic whose QoS differs from the existing one
+    // (dds_topic.c: lookup_and_check_ktopic -> DDS_RETCODE_INCONSISTENT_POLICY).
     // ─────────────────────────────────────────────────────────────────────────────
 
     public class DdsTopicQosInheritanceTests : IDisposable
@@ -247,12 +247,12 @@ namespace CycloneDDS.Runtime.Tests
         public void Dispose() => _participant.Dispose();
 
         /// <summary>
-        /// Reader first: the reader creates the topic carrying ManualByTopic, so the writer —
-        /// which sets no liveliness of its own — inherits ManualByTopic from it and the two
-        /// match, despite the writer profile nominally asking for Automatic.
+        /// Reader first: the reader's ManualByTopic stays on the reader. The writer that
+        /// follows on the same topic name is Automatic, as its own profile says, and the two
+        /// are reported incompatible rather than silently reconciled through the topic.
         /// </summary>
         [Fact]
-        public void UnsetPolicies_AreInheritedFromWhicheverEndpointCreatedTheTopic()
+        public void UnsetPolicies_AreNotInheritedFromTheEndpointThatCreatedTheTopic()
         {
             const string topic = "QosTopicInherit_ReaderFirst";
             using var reader = new DdsReader<TestMessage>(_participant, topic,
@@ -261,18 +261,19 @@ namespace CycloneDDS.Runtime.Tests
                 DdsQos.Default with { Liveliness = DdsLiveliness.Automatic });
 
             Assert.True(
-                QosTestSupport.WaitUntil(() => reader.CurrentStatus.CurrentCount > 0, QosTestSupport.MatchTimeout),
-                "The writer left LIVELINESS unset and inherits the reader-created topic's ManualByTopic");
-            Assert.Equal(0u, reader.RequestedIncompatibleQosStatus.TotalCount);
+                QosTestSupport.WaitUntil(() => reader.RequestedIncompatibleQosStatus.TotalCount > 0, QosTestSupport.MatchTimeout),
+                "The reader's ManualByTopic must not reach the writer through the topic");
+            Assert.Equal(QosTestSupport.LivelinessPolicyId, reader.RequestedIncompatibleQosStatus.LastPolicyId);
+            Assert.Equal(0u, reader.CurrentStatus.CurrentCount);
         }
 
         /// <summary>
-        /// The same two profiles in the opposite order do not match: now the topic carries no
-        /// liveliness, so the writer falls through to Cyclone's Automatic default, which cannot
-        /// satisfy the reader's ManualByTopic.
+        /// The same two profiles in the opposite order reach the same verdict: an Automatic
+        /// writer cannot satisfy a ManualByTopic reader, and which endpoint created the topic
+        /// makes no difference to that.
         /// </summary>
         [Fact]
-        public void SameProfilesInTheOppositeOrder_DoNotMatch()
+        public void SameProfilesInTheOppositeOrder_ReachTheSameVerdict()
         {
             const string topic = "QosTopicInherit_WriterFirst";
             using var writer = new DdsWriter<TestMessage>(_participant, topic,
@@ -282,9 +283,28 @@ namespace CycloneDDS.Runtime.Tests
 
             Assert.True(
                 QosTestSupport.WaitUntil(() => reader.RequestedIncompatibleQosStatus.TotalCount > 0, QosTestSupport.MatchTimeout),
-                "With no liveliness on the topic the writer is Automatic and cannot satisfy the reader");
+                "An Automatic writer cannot satisfy a ManualByTopic reader in either order");
             Assert.Equal(QosTestSupport.LivelinessPolicyId, reader.RequestedIncompatibleQosStatus.LastPolicyId);
             Assert.Equal(0u, reader.CurrentStatus.CurrentCount);
+        }
+
+        /// <summary>
+        /// Two endpoints whose profiles differ must both be constructible on one topic name.
+        /// Cyclone rejects a second ktopic of the same name whose QoS differs, so this fails
+        /// with INCONSISTENT_POLICY the moment an endpoint profile is handed to
+        /// dds_create_topic.
+        /// </summary>
+        [Fact]
+        public void EndpointsWithDifferentProfiles_CanShareATopicName()
+        {
+            const string topic = "QosTopicInherit_DifferingProfiles";
+            using var writer = new DdsWriter<TestMessage>(_participant, topic,
+                DdsQos.Default with { Lifespan = 5.0, Deadline = 2.0 });
+            using var reader = new DdsReader<TestMessage>(_participant, topic, DdsQos.SystemDefault);
+
+            Assert.True(
+                QosTestSupport.WaitUntil(() => reader.CurrentStatus.CurrentCount > 0, QosTestSupport.MatchTimeout),
+                "A reader that asks for nothing matches a writer that asks for more");
         }
 
         /// <summary>
