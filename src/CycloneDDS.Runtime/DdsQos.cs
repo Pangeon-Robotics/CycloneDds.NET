@@ -220,9 +220,10 @@ namespace CycloneDDS.Runtime
 					DdsApi.dds_qset_lifespan(qos, DdsApi.Duration(Lifespan));
 				}
 
-				if (Liveliness.HasValue)
+				if (Liveliness.HasValue || LivelinessLease.HasValue)
 				{
-					DdsApi.dds_qset_liveliness(qos, (int)Liveliness, DdsApi.Duration(LivelinessLease));
+					// Default to Automatic if only the lease is set
+					DdsApi.dds_qset_liveliness(qos, (int)(Liveliness ?? DdsLiveliness.Automatic), DdsApi.Duration(LivelinessLease));
 				}
 
 				return qos;
