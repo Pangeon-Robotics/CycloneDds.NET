@@ -13,10 +13,11 @@ namespace CycloneDDS.Runtime
         private readonly string? _defaultPartition;
         private bool _disposed;
 
-        private readonly List<DdsApi.DdsEntity> _topicCache = [];
+        // Topics are shared per (name, type) and reference counted: every RegisterTopic hands
+        // back the same native entity, every ReleaseTopic gives it up, and the last release
+        // deletes the topic and frees the descriptor it was created from.
+        private readonly Dictionary<(string Name, Type Type), TopicEntry> _topics = [];
         private readonly object _topicLock = new();
-        // Track unmanaged resources for topics so we can free them on Dispose
-        private readonly List<IDisposable> _topicResources = [];
 
         private SenderIdentityConfig? _identityConfig;
         private DdsWriter<SenderIdentity>? _identityWriter;
@@ -80,25 +81,20 @@ namespace CycloneDDS.Runtime
         {
             if (!_disposed)
             {
-                lock (_topicLock)
-                {
-                    // Delete all cached topics
-                    foreach (var topic in _topicCache)
-                    {
-                        DdsApi.dds_delete(topic);
-                    }
-                    _topicCache.Clear();
-
-                    // Free unmanaged resources
-                    foreach (var resource in _topicResources)
-                    {
-                        resource.Dispose();
-                    }
-                    _topicResources.Clear();
-                }
-
+                // Dispose our own endpoints first so they release their topics normally.
                 _senderRegistry?.Dispose();
                 _identityWriter?.Dispose();
+
+                lock (_topicLock)
+                {
+                    // Anything left here is still held by an endpoint the caller never disposed
+                    foreach (var entry in _topics.Values)
+                    {
+                        DdsApi.dds_delete(entry.Entity);
+                        entry.Resource.Dispose();
+                    }
+                    _topics.Clear();
+                }
 
                 _handle?.Dispose();
                 _handle = null;
@@ -107,38 +103,85 @@ namespace CycloneDDS.Runtime
         }
 
         /// <summary>
-        /// Register a topic for type T. Thread-safe.
+        /// Register a topic for type T. The native topic is created on the first registration of
+        /// a (topic name, type) pair and shared by every later registration of that pair; each
+        /// call must be balanced by a <see cref="ReleaseTopic{T}"/>. Thread-safe.
         /// </summary>
-        internal DdsApi.DdsEntity RegisterTopic<T>(string topicName, IntPtr qos = default)
+        internal DdsApi.DdsEntity RegisterTopic<T>(string topicName)
         {
             lock (_topicLock)
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
+
+                var key = (topicName, typeof(T));
+                if (_topics.TryGetValue(key, out TopicEntry? existing))
+                {
+                    existing.RefCount++;
+                    return existing.Entity;
+                }
 
                 // 1. Get descriptor ops from static method (via reflection)
                 uint[] ops = DdsTypeSupport.GetDescriptorOps<T>();
                 DdsKeyDescriptor[] keys = DdsTypeSupport.GetKeyDescriptors<T>();
 
                 // 2. Marshal descriptor to native
-                IntPtr descriptorPtr = MarshalDescriptor<T>(ops, keys, DdsTypeSupport.GetTypeName<T>());
+                IntPtr descriptorPtr = MarshalDescriptor<T>(ops, keys, DdsTypeSupport.GetTypeName<T>(), out TopicResource resource);
 
-                // 3. Create native topic
+                // 3. Create native topic. The QoS is deliberately left NULL: a QoS stored on the
+                // ktopic makes every later endpoint with a different QoS fail with
+                // DDS_RETCODE_INCONSISTENT_POLICY.
                 DdsApi.DdsEntity topic = DdsApi.dds_create_topic(
                     NativeEntity,
                     descriptorPtr,
                     topicName,
-                    qos,
+                    IntPtr.Zero,
                     IntPtr.Zero);
 
                 if (!topic.IsValid)
                 {
+                    resource.Dispose();
                     throw new DdsException(DdsApi.DdsReturnCode.Error,
                         $"Failed to create topic '{topicName}' for type '{DdsTypeSupport.GetTypeName<T>()}'");
                 }
 
-                _topicCache.Add(topic);
+                _topics.Add(key, new TopicEntry(topic, resource));
                 return topic;
             }
+        }
+
+        /// <summary>
+        /// Gives back one registration taken by <see cref="RegisterTopic{T}"/>. The last release
+        /// deletes the native topic and frees its descriptor. Thread-safe; calls made after the
+        /// participant is disposed are ignored, as everything is already gone by then.
+        /// </summary>
+        internal void ReleaseTopic<T>(string topicName)
+        {
+            lock (_topicLock)
+            {
+                if (_disposed) return;
+
+                var key = (topicName, typeof(T));
+                if (!_topics.TryGetValue(key, out TopicEntry? entry)) return;
+
+                if (--entry.RefCount > 0) return;
+
+                _topics.Remove(key);
+                DdsApi.dds_delete(entry.Entity);
+                entry.Resource.Dispose();
+            }
+        }
+
+        private sealed class TopicEntry
+        {
+            public TopicEntry(DdsApi.DdsEntity entity, TopicResource resource)
+            {
+                Entity = entity;
+                Resource = resource;
+            }
+
+            public DdsApi.DdsEntity Entity { get; }
+            public TopicResource Resource { get; }
+            public int RefCount { get; set; } = 1;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -288,7 +331,7 @@ namespace CycloneDDS.Runtime
             return (uint)IntPtr.Size; // Default to machine word size (8 on x64)
         }
 
-        private IntPtr MarshalDescriptor<T>(uint[] ops, DdsKeyDescriptor[] keys, string typeName)
+        private static IntPtr MarshalDescriptor<T>(uint[] ops, DdsKeyDescriptor[] keys, string typeName, out TopicResource resource)
         {
             // Marshal type name
             IntPtr typeNamePtr = Marshal.StringToHGlobalAnsi(typeName);
@@ -397,8 +440,8 @@ namespace CycloneDDS.Runtime
             IntPtr descPtr = Marshal.AllocHGlobal(Marshal.SizeOf<DdsTopicDescriptor>());
             Marshal.StructureToPtr(desc, descPtr, false);
 
-            // Track resources for cleanup
-            _topicResources.Add(new TopicResource(descPtr, typeNamePtr, opsHandle, keysPtr, keyNamePtrs));
+            // Hand the resources back so they live and die with the topic entity
+            resource = new TopicResource(descPtr, typeNamePtr, opsHandle, keysPtr, keyNamePtrs);
 
             return descPtr;
         }

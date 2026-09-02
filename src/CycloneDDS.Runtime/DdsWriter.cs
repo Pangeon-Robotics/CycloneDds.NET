@@ -77,7 +77,11 @@ namespace CycloneDDS.Runtime
         /// <summary>
         /// Creates a writer for <typeparamref name="T"/> on <paramref name="participant"/>.
         /// </summary>
-        /// <param name="participant">Owning participant. The topic is created or fetched from its cache.</param>
+        /// <param name="participant">
+        /// Owning participant. The native topic is created on the first use of this (topic name,
+        /// type) pair, shared with every other endpoint using it, and deleted once the last of
+        /// them — this writer included — is disposed.
+        /// </param>
         /// <param name="topicName">
         /// Topic name; when null it is taken from the type's <c>[DdsTopic]</c> attribute.
         /// </param>
@@ -134,16 +138,26 @@ namespace CycloneDDS.Runtime
 
                 _topicHandle = participant.RegisterTopic<T>(topicName);
 
-                DdsApi.DdsEntity writer = DdsApi.dds_create_writer(
-                    participant.NativeEntity,
-                    _topicHandle,
-                    nativeQos,
-                    IntPtr.Zero);
+                try
+                {
+                    DdsApi.DdsEntity writer = DdsApi.dds_create_writer(
+                        participant.NativeEntity,
+                        _topicHandle,
+                        nativeQos,
+                        IntPtr.Zero);
 
-                if (!writer.IsValid)
-                    throw new DdsException(DdsApi.DdsReturnCode.Error, "Failed to create writer");
+                    if (!writer.IsValid)
+                        throw new DdsException(DdsApi.DdsReturnCode.Error, "Failed to create writer");
 
-                _writerHandle = new DdsEntityHandle(writer);
+                    _writerHandle = new DdsEntityHandle(writer);
+                }
+                catch
+                {
+                    // No writer took ownership of the registration, so give it straight back
+                    participant.ReleaseTopic<T>(topicName);
+                    _topicHandle = DdsApi.DdsEntity.Null;
+                    throw;
+                }
             }
             finally
             {
@@ -479,6 +493,8 @@ namespace CycloneDDS.Runtime
 
             _writerHandle?.Dispose();
             _writerHandle = null;
+
+            _participant?.ReleaseTopic<T>(_topicName);
             _topicHandle = DdsApi.DdsEntity.Null;
             _participant = null;
         }

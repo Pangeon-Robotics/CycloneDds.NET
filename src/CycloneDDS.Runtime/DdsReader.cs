@@ -20,6 +20,7 @@ namespace CycloneDDS.Runtime
         private SenderRegistry? _registry;
         private DdsEntityHandle? _readerHandle;
         private DdsApi.DdsEntity _topicHandle;
+        private readonly string _topicName;
         private DdsParticipant? _participant;
 
         private IntPtr _listener = IntPtr.Zero;
@@ -149,7 +150,11 @@ namespace CycloneDDS.Runtime
         /// <summary>
         /// Creates a reader for <typeparamref name="T"/> on <paramref name="participant"/>.
         /// </summary>
-        /// <param name="participant">Owning participant. The topic is created or fetched from its cache.</param>
+        /// <param name="participant">
+        /// Owning participant. The native topic is created on the first use of this (topic name,
+        /// type) pair, shared with every other endpoint using it, and deleted once the last of
+        /// them — this reader included — is disposed.
+        /// </param>
         /// <param name="topicName">
         /// Topic name; when null it is taken from the type's <c>[DdsTopic]</c> attribute.
         /// </param>
@@ -169,6 +174,7 @@ namespace CycloneDDS.Runtime
             _subscriptionMatchedHandler = OnSubscriptionMatched;
 
             topicName ??= GetTopicNameFromAttribute();
+            _topicName = topicName;
             _participant = participant;
 
             // Use the provided QoS, one provided from the type attribute, or the default
@@ -201,20 +207,30 @@ namespace CycloneDDS.Runtime
 
                 _topicHandle = participant.RegisterTopic<T>(topicName);
 
-                DdsApi.DdsEntity reader = DdsApi.dds_create_reader(
-                    participant.NativeEntity,
-                    _topicHandle,
-                    nativeQos,
-                    IntPtr.Zero);
-
-                if (!reader.IsValid)
+                try
                 {
-                    int err = reader.Handle;
-                    DdsApi.DdsReturnCode rc = (DdsApi.DdsReturnCode)err;
-                    throw new DdsException(rc, $"Failed to create reader for '{topicName}'");
-                }
+                    DdsApi.DdsEntity reader = DdsApi.dds_create_reader(
+                        participant.NativeEntity,
+                        _topicHandle,
+                        nativeQos,
+                        IntPtr.Zero);
 
-                _readerHandle = new DdsEntityHandle(reader);
+                    if (!reader.IsValid)
+                    {
+                        int err = reader.Handle;
+                        DdsApi.DdsReturnCode rc = (DdsApi.DdsReturnCode)err;
+                        throw new DdsException(rc, $"Failed to create reader for '{topicName}'");
+                    }
+
+                    _readerHandle = new DdsEntityHandle(reader);
+                }
+                catch
+                {
+                    // No reader took ownership of the registration, so give it straight back
+                    participant.ReleaseTopic<T>(topicName);
+                    _topicHandle = DdsApi.DdsEntity.Null;
+                    throw;
+                }
             }
             finally
             {
@@ -403,6 +419,9 @@ namespace CycloneDDS.Runtime
 
             _readerHandle?.Dispose();
             _readerHandle = null;
+
+            // Null participant means we already released; keeps a second Dispose harmless
+            _participant?.ReleaseTopic<T>(_topicName);
             _topicHandle = DdsApi.DdsEntity.Null;
             _participant = null;
         }
