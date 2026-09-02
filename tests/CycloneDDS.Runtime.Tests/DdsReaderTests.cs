@@ -18,8 +18,11 @@ namespace CycloneDDS.Runtime.Tests
         [Fact]
         public void Take_NoData_ReturnsEmptyScope()
         {
+            // Topic name must not be shared with any writer in the suite: xUnit runs classes as
+            // parallel collections on the same domain, so a sample written elsewhere on this
+            // topic would land here and break the empty-scope assertion.
             using var participant = new DdsParticipant(0);
-            using var reader = new DdsReader<TestMessage>(participant, "TestTopic_Unique2");
+            using var reader = new DdsReader<TestMessage>(participant, "TestTopic_ReaderOnly_NoData");
             
             using var scope = reader.Take();
             

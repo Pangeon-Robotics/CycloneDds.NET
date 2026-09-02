@@ -353,7 +353,10 @@ namespace CycloneDDS.Runtime.Tests
             Assert.Equal(0, count);
         }
 
-        [Fact(Timeout = 5000)]
+        // Timeout raised from 5000: on low-core CI runners xUnit runs sibling collections in
+        // parallel and the blocking Wait() below can be delayed >10s waiting for a pool thread.
+        // Stopgap — the real fix is to bound test parallelism, not to wait longer.
+        [Fact(Timeout = 30000)]
         public async Task DdsWaitSet_Wait_CancellationTokenCancels()
         {
             using var participant = new DdsParticipant(0);

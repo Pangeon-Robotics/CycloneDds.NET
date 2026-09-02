@@ -110,6 +110,10 @@ namespace CycloneDDS.Runtime
 
             try
             {
+                // FIXME: the guard condition is never reset to false — not here, and not in the
+                // cancellation callback below. Once triggered it stays latched, so every later
+                // Wait() on this waitset returns immediately. Tests miss it because each one
+                // builds a fresh waitset.
                 // Pre-trigger the guard immediately if already cancelled
                 if (cancellationToken.IsCancellationRequested)
                 {

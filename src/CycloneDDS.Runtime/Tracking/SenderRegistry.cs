@@ -157,6 +157,10 @@ namespace CycloneDDS.Runtime.Tracking
         {
             _cancellation.Cancel();
             _identityReader?.Dispose();
+            // FIXME: the CTS is disposed before _monitorTask is awaited below, so the loop in
+            // MonitorIdentitiesAsync can read _cancellation.Token on a disposed CTS and throw
+            // ObjectDisposedException (the "[SenderRegistry] Monitor task failed" noise in test
+            // runs). Dispose the CTS only after the monitor task has completed.
             _cancellation.Dispose();
 
             // Wait for monitor task to complete (with timeout)
