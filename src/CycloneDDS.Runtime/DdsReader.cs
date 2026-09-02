@@ -199,7 +199,7 @@ namespace CycloneDDS.Runtime
                     DdsApi.dds_qset_partition(nativeQos, 1, [activePartition]);
                 }
 
-                _topicHandle = participant.RegisterTopic<T>(topicName, nativeQos);
+                _topicHandle = participant.RegisterTopic<T>(topicName);
 
                 DdsApi.DdsEntity reader = DdsApi.dds_create_reader(
                     participant.NativeEntity,

@@ -132,7 +132,7 @@ namespace CycloneDDS.Runtime
                     DdsApi.dds_qset_partition(nativeQos, 1, [activePartition]);
                 }
 
-                _topicHandle = participant.RegisterTopic<T>(topicName, nativeQos);
+                _topicHandle = participant.RegisterTopic<T>(topicName);
 
                 DdsApi.DdsEntity writer = DdsApi.dds_create_writer(
                     participant.NativeEntity,
