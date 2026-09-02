@@ -5,6 +5,8 @@
     <Nullable>enable</Nullable>
     <LangVersion>12.0</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>CycloneDDS.Core</PackageId>
     <IsPackable>false</IsPackable>
   </PropertyGroup>

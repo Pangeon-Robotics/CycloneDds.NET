@@ -1,4 +1,4 @@
-namespace CycloneDDS.Schema;
+namespace CycloneDDS.Runtime;
 
 /// <summary>
 /// DDS QoS policy ids, as reported by REQUESTED_INCOMPATIBLE_QOS. The full standard set

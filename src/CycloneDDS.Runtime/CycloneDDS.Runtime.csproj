@@ -5,7 +5,8 @@
     <Nullable>enable</Nullable>
     <LangVersion>12.0</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <NoWarn>CS8600;CS8601;CS8603;CS8604</NoWarn>
+    <NoWarn>CS8600;CS8601;CS8603;CS8604;CS1591</NoWarn>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>CycloneDDS.NET</PackageId>
     <Description>Cyclone DDS Runtime bindings for .NET (Windows x64, Linux x64)</Description>
     <IsPackable>true</IsPackable>
@@ -117,6 +118,14 @@
   <ItemGroup>
     <None Include="$(OutputPath)\CycloneDDS.Core.dll" Pack="true" PackagePath="lib\$(TargetFramework)" Visible="false" />
     <None Include="$(OutputPath)\CycloneDDS.Schema.dll" Pack="true" PackagePath="lib\$(TargetFramework)" Visible="false" />
+    <!-- Ship the XML documentation files next to their DLLs so consumers get
+         IntelliSense for CycloneDDS.Core / CycloneDDS.Schema too. These are
+         manually-packed project-reference outputs, so unlike CycloneDDS.Runtime.xml
+         they are not auto-collected by the pack target. -->
+    <None Include="$(OutputPath)\CycloneDDS.Core.xml" Pack="true" PackagePath="lib\$(TargetFramework)" Visible="false"
+          Condition="Exists('$(OutputPath)\CycloneDDS.Core.xml')" />
+    <None Include="$(OutputPath)\CycloneDDS.Schema.xml" Pack="true" PackagePath="lib\$(TargetFramework)" Visible="false"
+          Condition="Exists('$(OutputPath)\CycloneDDS.Schema.xml')" />
     <!-- Ship the SourceLink-enabled PDBs next to their DLLs so consumers can debug
          into CycloneDDS.Core / CycloneDDS.Schema too (not just CycloneDDS.Runtime).
          These are manually-packed project-reference outputs, so their symbols are
