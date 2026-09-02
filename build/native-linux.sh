@@ -116,6 +116,23 @@ copy_lib libcycloneddsidl
 copy_lib libcycloneddsidlc
 copy_lib libcycloneddsidljson
 
+# DDS Security plugins (ENABLE_SECURITY=ON). Unlike the libraries above these are
+# unversioned, and ddsc dlopen()s them by bare soname ("libdds_security_auth.so")
+# when a <Security> section is present in the domain configuration. glibc resolves
+# a dlopen from within libddsc.so against libddsc.so's own DT_RUNPATH, which the
+# RPATH fix below sets to $ORIGIN - so staging them flat next to libddsc.so here is
+# what makes them findable at runtime. Without them every secure participant fails
+# with "Could not load authentication library".
+for plugin in libdds_security_auth libdds_security_ac libdds_security_crypto; do
+    if [ -f "$LIB_DIR/${plugin}.so" ]; then
+        cp -f "$LIB_DIR/${plugin}.so" "$ARTIFACTS_DIR/${plugin}.so"
+        echo "  [+] ${plugin}.so"
+    else
+        echo "  [-] Missing ${plugin}.so in $LIB_DIR" >&2
+        exit 1
+    fi
+done
+
 # IDL compiler executable.
 if [ -f "$BIN_DIR/idlc" ]; then
     cp -f "$BIN_DIR/idlc" "$ARTIFACTS_DIR/"
