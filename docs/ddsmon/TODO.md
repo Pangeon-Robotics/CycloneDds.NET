@@ -1,1 +1,0 @@
-# next ideas on top of the 

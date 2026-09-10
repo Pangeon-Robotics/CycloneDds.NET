@@ -82,25 +82,23 @@ namespace CycloneDDS.Runtime
         /// type) pair, shared with every other endpoint using it, and deleted once the last of
         /// them — this writer included — is disposed.
         /// </param>
-        /// <param name="topicName">
-        /// Topic name; when null it is taken from the type's <c>[DdsTopic]</c> attribute.
-        /// </param>
+        /// <param name="topicName">Topic name.</param>
         /// <param name="qos">
-        /// QoS profile to apply. When null the type's <c>[DdsQos]</c> attribute is used, falling
-        /// back to <see cref="DdsQos.SystemDefault"/> — i.e. Cyclone's own defaults — when the
-        /// type carries no such attribute.
+        /// QoS profile to apply. When null, <see cref="DdsQos.SystemDefault"/> is used — i.e.
+        /// Cyclone's own defaults.
         /// </param>
         /// <param name="partition">Partition to publish into.</param>
+        /// <exception cref="ArgumentException"><paramref name="topicName"/> is null or empty.</exception>
         /// <exception cref="InvalidOperationException">
-        /// <typeparamref name="T"/> lacks the generated native marshalling methods, or no topic
-        /// name was supplied and the type has no <c>[DdsTopic]</c> attribute.
+        /// <typeparamref name="T"/> lacks the generated native marshalling methods.
         /// </exception>
         /// <exception cref="DdsException">Cyclone rejected the writer.</exception>
-        public DdsWriter(DdsParticipant participant, string? topicName = null, DdsQos? qos = default, string? partition = null)
+        public DdsWriter(DdsParticipant participant, string topicName, DdsQos? qos = default, string? partition = null)
         {
-            topicName ??= GetTopicNameFromAttribute();
+            ArgumentException.ThrowIfNullOrEmpty(topicName);
+
             _participant = participant;
-            _topicName = topicName!;
+            _topicName = topicName;
             _publicationMatchedHandler = OnPublicationMatched;
 
             if (_nativeSizer == null || _nativeMarshaller == null)
@@ -108,25 +106,9 @@ namespace CycloneDDS.Runtime
                 throw new InvalidOperationException($"Type {typeof(T).Name} does not exhibit expected DDS generated native methods (GetNativeSize, MarshalToNative).");
             }
 
-            // Use the provided QoS, one provided from the type attribute, or the default
-            DdsQos chosenQos = qos;
-
-            if (chosenQos is null)
-            {
-                var qosAttr = typeof(T).GetCustomAttribute<DdsQosAttribute>();
-                if (qosAttr != null)
-                {
-                    chosenQos = DdsQos.FromAttribute(qosAttr);
-                }
-                else
-                {
-                    // No attribute: leave every policy to Cyclone, matching what an empty
-                    // dds_create_qos() produced before QoS profiles existed.
-                    chosenQos = DdsQos.SystemDefault;
-                }
-            }
-
-            nint nativeQos = chosenQos.CreateNative();
+            // No profile: leave every policy to Cyclone, matching what an empty
+            // dds_create_qos() produced before QoS profiles existed.
+            nint nativeQos = (qos ?? DdsQos.SystemDefault).CreateNative();
 
             try
             {
@@ -171,13 +153,6 @@ namespace CycloneDDS.Runtime
             {
                 _participant.RegisterWriter();
             }
-        }
-
-        private static string GetTopicNameFromAttribute()
-        {
-            var attr = typeof(T).GetCustomAttribute<DdsTopicAttribute>();
-            if (attr == null) throw new InvalidOperationException($"Type {typeof(T).Name} is missing [DdsTopic] attribute. You must specify topicName manually.");
-            return attr.TopicName;
         }
 
         public void Write(in T sample)

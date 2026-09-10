@@ -108,7 +108,7 @@ namespace CycloneDDS.CodeGen.Tests
 using CycloneDDS.Schema;
 namespace Scan
 {
-    [DdsTopic(""T"")]
+    [DdsStruct]
     public unsafe partial struct FixedByteMsg
     {
         [DdsKey] public int Id;
@@ -209,7 +209,7 @@ namespace Scan
 using CycloneDDS.Schema;
 namespace Scan
 {
-    [DdsTopic(""Mixed"")]
+    [DdsStruct]
     public unsafe partial struct MixedMsg
     {
         [DdsKey] public int Id;

@@ -1,6 +1,5 @@
 using System;
 using CycloneDDS.Runtime.Interop;
-using CycloneDDS.Schema;
 
 namespace CycloneDDS.Runtime
 {
@@ -104,7 +103,7 @@ namespace CycloneDDS.Runtime
 		/// Reliable on a writer.
 		/// </summary>
 		/// <remarks>
-		/// This is what a topic with no <see cref="DdsQosAttribute"/> gets, and it is the
+		/// This is what a reader or writer created without a profile gets, and it is the
 		/// profile a raw <c>dds_create_qos()</c> would have produced. Use it as the base when
 		/// you want to override one policy and leave the rest to Cyclone:
 		/// <code>
@@ -142,29 +141,6 @@ namespace CycloneDDS.Runtime
 		{
 			Durability = DdsDurability.TransientLocal,
 		};
-
-		// ---- Bridge Attribute Style ------------------------------------------------
-
-		/// <summary>
-		/// Projects a type's <see cref="DdsQosAttribute"/> onto an equivalent profile, so a
-		/// declaratively decorated topic and an explicitly passed profile take the same path.
-		/// </summary>
-		/// <param name="attribute">The attribute found on the topic type.</param>
-		internal static DdsQos FromAttribute(DdsQosAttribute attribute)
-		{
-			return new DdsQos()
-			{
-				Reliability = attribute.Reliability,
-				MaxBlockingSeconds = attribute.MaxBlockingSeconds,
-				Durability = attribute.Durability,
-				HistoryKind = attribute.HistoryKind,
-				Liveliness = attribute.Liveliness,
-				HistoryDepth = attribute.HistoryDepth,
-				Deadline = attribute.Deadline < 0 ? null : attribute.Deadline,
-				LivelinessLease = attribute.LivelinessLease < 0 ? null : attribute.LivelinessLease,
-				Lifespan = attribute.Lifespan < 0 ? null : attribute.Lifespan
-			};
-		}
 
 		// ---- Native construction ---------------------------------------------------
 

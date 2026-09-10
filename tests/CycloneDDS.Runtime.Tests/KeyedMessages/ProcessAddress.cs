@@ -2,7 +2,7 @@ using CycloneDDS.Schema;
 
 namespace CycloneDDS.Runtime.Tests.KeyedMessages
 {
-    [DdsTopic("ProcessAddress")] // Optional, but usually structs don't need topics unless likely to be top level.
+    [DdsStruct]
     [DdsIdlFile("NestedKeys")]
     [DdsExtensibility(DdsExtensibilityKind.Final)]
     public partial struct ProcessAddress

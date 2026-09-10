@@ -94,7 +94,7 @@ namespace CycloneDDS.CodeGen
                 if (!IsValidUserType(innerType) && !TypeMapper.IsPrimitive(innerType) && innerType != "string" && innerType != "System.String")
                 {
                     errors.Add($"Field '{containerName}.{field.Name}' uses collection of type '{innerType}', " +
-                               $"which is not a valid DDS type. Mark '{innerType}' with [DdsStruct] or [DdsTopic].");
+                               $"which is not a valid DDS type. Mark '{innerType}' with [DdsStruct].");
                 }
                 return;
             }
@@ -107,7 +107,7 @@ namespace CycloneDDS.CodeGen
                 if (!IsValidUserType(innerType) && !TypeMapper.IsPrimitive(innerType) && innerType != "string" && innerType != "System.String")
                 {
                     errors.Add($"Field '{containerName}.{field.Name}' uses array of type '{innerType}', " +
-                               $"which is not a valid DDS type. Mark '{innerType}' with [DdsStruct] or [DdsTopic].");
+                               $"which is not a valid DDS type. Mark '{innerType}' with [DdsStruct].");
                 }
                 return;
             }
@@ -124,7 +124,7 @@ namespace CycloneDDS.CodeGen
             {
                 errors.Add($"Field '{containerName}.{field.Name}' uses type '{typeName}', " +
                            $"which is not a valid DDS type. " +
-                           $"Did you forget to add [DdsStruct] or [DdsTopic] to '{typeName}'?");
+                           $"Did you forget to add [DdsStruct] to '{typeName}'?");
             }
         }
    

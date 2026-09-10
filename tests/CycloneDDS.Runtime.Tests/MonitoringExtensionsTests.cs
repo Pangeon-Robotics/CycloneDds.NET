@@ -8,12 +8,6 @@ using CycloneDDS.Runtime.Interop;
 
 namespace CycloneDDS.Runtime.Tests
 {
-    // Helper: a type without [DdsTopic] attribute — used in "throws" tests
-    public partial struct NoAttributeMessage
-    {
-        public int Value;
-    }
-
     // ─────────────────────────────────────────────────────────────────────────────
     // MONEXT-001 — dds_qset_partition interop
     // ─────────────────────────────────────────────────────────────────────────────
@@ -172,18 +166,6 @@ namespace CycloneDDS.Runtime.Tests
     public class DdsReader_UnifiedCtorTests
     {
         [Fact]
-        public void DdsReader_UnifiedCtor_TopicFromAttribute()
-        {
-            // TestMessage has [DdsTopic("TestMessageTopic")] — no explicit topicName needed
-            using var participant = new DdsParticipant(0);
-            var ex = Record.Exception(() =>
-            {
-                using var reader = new DdsReader<TestMessage>(participant);
-            });
-            Assert.Null(ex);
-        }
-
-        [Fact]
         public void DdsReader_UnifiedCtor_ExplicitTopic()
         {
             using var participant = new DdsParticipant(0);
@@ -195,12 +177,12 @@ namespace CycloneDDS.Runtime.Tests
         }
 
         [Fact]
-        public void DdsReader_UnifiedCtor_MissingAttributeThrows()
+        public void DdsReader_UnifiedCtor_EmptyTopicThrows()
         {
             using var participant = new DdsParticipant(0);
-            Assert.Throws<InvalidOperationException>(() =>
+            Assert.Throws<ArgumentException>(() =>
             {
-                using var reader = new DdsReader<NoAttributeMessage>(participant);
+                using var reader = new DdsReader<TestMessage>(participant, "");
             });
         }
     }
@@ -211,17 +193,6 @@ namespace CycloneDDS.Runtime.Tests
 
     public class DdsWriter_UnifiedCtorTests
     {
-        [Fact]
-        public void DdsWriter_UnifiedCtor_TopicFromAttribute()
-        {
-            using var participant = new DdsParticipant(0);
-            var ex = Record.Exception(() =>
-            {
-                using var writer = new DdsWriter<TestMessage>(participant);
-            });
-            Assert.Null(ex);
-        }
-
         [Fact]
         public void DdsWriter_UnifiedCtor_ExplicitTopic()
         {
@@ -234,12 +205,12 @@ namespace CycloneDDS.Runtime.Tests
         }
 
         [Fact]
-        public void DdsWriter_UnifiedCtor_MissingAttributeThrows()
+        public void DdsWriter_UnifiedCtor_EmptyTopicThrows()
         {
             using var participant = new DdsParticipant(0);
-            Assert.Throws<InvalidOperationException>(() =>
+            Assert.Throws<ArgumentException>(() =>
             {
-                using var writer = new DdsWriter<NoAttributeMessage>(participant);
+                using var writer = new DdsWriter<TestMessage>(participant, "");
             });
         }
     }

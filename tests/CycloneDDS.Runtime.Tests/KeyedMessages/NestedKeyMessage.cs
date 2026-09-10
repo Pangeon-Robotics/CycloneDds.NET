@@ -3,7 +3,7 @@ using CycloneDDS.Schema;
 namespace CycloneDDS.Runtime.Tests.KeyedMessages
 {
     // Flattened to avoid CodeGen/Runtime StackOverflow with nested struct keys
-    [DdsTopic("NestedKeyMessage")]
+    [DdsStruct]
     public partial struct NestedKeyMessage
     {
         [DdsKey]

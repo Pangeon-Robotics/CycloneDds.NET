@@ -44,7 +44,7 @@ namespace CycloneDDS.CodeGen
             var references = new List<MetadataReference>
             {
                 MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
-                MetadataReference.CreateFromFile(typeof(CycloneDDS.Schema.DdsTopicAttribute).Assembly.Location)
+                MetadataReference.CreateFromFile(typeof(CycloneDDS.Schema.DdsStructAttribute).Assembly.Location)
             };
 
             if (referencePaths != null)
@@ -93,20 +93,18 @@ namespace CycloneDDS.CodeGen
                     var typeSymbol = semanticModel.GetDeclaredSymbol(typeDecl);
                     if (typeSymbol == null) continue;
 
-                    bool isTopic = HasAttribute(typeSymbol, "CycloneDDS.Schema.DdsTopicAttribute");
                     bool isStruct = HasAttribute(typeSymbol, "CycloneDDS.Schema.DdsStructAttribute");
                     bool isUnion = HasAttribute(typeSymbol, "CycloneDDS.Schema.DdsUnionAttribute");
                     bool isEnum = typeSymbol.TypeKind == TypeKind.Enum;
                     bool isClass = typeSymbol.TypeKind == TypeKind.Class;
 
-                    if (isTopic || isStruct || isUnion || isEnum)
+                    if (isStruct || isUnion || isEnum)
                     {
                         var typeInfo = new TypeInfo 
                         { 
                             Name = typeSymbol.Name,
                             Namespace = (typeSymbol.ContainingNamespace?.ToDisplayString() ?? string.Empty).Replace("<global namespace>", "").Trim('.'),
                             SourceFile = tree.FilePath,
-                            IsTopic = isTopic,
                             IsStruct = isStruct,
                             IsUnion = isUnion,
                             IsEnum = isEnum,
@@ -116,7 +114,6 @@ namespace CycloneDDS.CodeGen
 
                         SetExtensibility(typeSymbol, typeInfo);
                         PopulateEnumOrFields(typeSymbol, typeInfo, isEnum);
-                        if (isTopic) ResolveTopicName(typeSymbol, typeInfo);
                         ExtractFormatTemplate(typeSymbol, typeInfo);
 
                         topics.Add(typeInfo);
@@ -304,32 +301,6 @@ namespace CycloneDDS.CodeGen
             }
         }
 
-        /// <summary>
-        /// ME1-T03: Resolves the DDS topic name from the <c>[DdsTopic]</c> attribute argument
-        /// or falls back to the namespace-qualified type name with dots replaced by underscores.
-        /// </summary>
-        private static void ResolveTopicName(INamedTypeSymbol typeSymbol, TypeInfo typeInfo)
-        {
-            var topicAttr = typeSymbol.GetAttributes()
-                .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == "CycloneDDS.Schema.DdsTopicAttribute");
-
-            string? explicitName = null;
-            if (topicAttr != null && topicAttr.ConstructorArguments.Length > 0)
-                explicitName = topicAttr.ConstructorArguments[0].Value as string;
-
-            if (!string.IsNullOrWhiteSpace(explicitName))
-            {
-                typeInfo.TopicName = explicitName;
-            }
-            else
-            {
-                var fullName = string.IsNullOrEmpty(typeInfo.Namespace)
-                    ? typeInfo.Name
-                    : $"{typeInfo.Namespace}.{typeInfo.Name}";
-                typeInfo.TopicName = fullName.Replace('.', '_');
-            }
-        }
-
         private bool HasAttribute(ISymbol symbol, string attributeFullName)
         {
             return symbol.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == attributeFullName);
@@ -416,7 +387,6 @@ namespace CycloneDDS.CodeGen
 
             // Capture valid DDS types (even external ones) for validation
             if (HasAttribute(type, "CycloneDDS.Schema.DdsStructAttribute") || 
-                HasAttribute(type, "CycloneDDS.Schema.DdsTopicAttribute") ||
                 HasAttribute(type, "CycloneDDS.Schema.DdsUnionAttribute") ||
                 type.TypeKind == TypeKind.Enum)
             {
@@ -501,7 +471,6 @@ namespace CycloneDDS.CodeGen
         {
             return type.TypeKind == TypeKind.Enum ||
                    HasAttribute(type, "CycloneDDS.Schema.DdsStructAttribute") ||
-                   HasAttribute(type, "CycloneDDS.Schema.DdsTopicAttribute") ||
                    HasAttribute(type, "CycloneDDS.Schema.DdsUnionAttribute");
         }
     }

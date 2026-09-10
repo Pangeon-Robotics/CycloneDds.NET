@@ -155,47 +155,27 @@ namespace CycloneDDS.Runtime
         /// type) pair, shared with every other endpoint using it, and deleted once the last of
         /// them — this reader included — is disposed.
         /// </param>
-        /// <param name="topicName">
-        /// Topic name; when null it is taken from the type's <c>[DdsTopic]</c> attribute.
-        /// </param>
+        /// <param name="topicName">Topic name.</param>
         /// <param name="qos">
-        /// QoS profile to apply. When null the type's <c>[DdsQos]</c> attribute is used, falling
-        /// back to <see cref="DdsQos.SystemDefault"/> — i.e. Cyclone's own defaults — when the
-        /// type carries no such attribute.
+        /// QoS profile to apply. When null, <see cref="DdsQos.SystemDefault"/> is used — i.e.
+        /// Cyclone's own defaults.
         /// </param>
         /// <param name="partition">Partition to subscribe in.</param>
-        /// <exception cref="InvalidOperationException">
-        /// No topic name was supplied and the type has no <c>[DdsTopic]</c> attribute.
-        /// </exception>
+        /// <exception cref="ArgumentException"><paramref name="topicName"/> is null or empty.</exception>
         /// <exception cref="DdsException">Cyclone rejected the reader.</exception>
-        public DdsReader(DdsParticipant participant, string? topicName = null, DdsQos? qos = default, string? partition = null)
+        public DdsReader(DdsParticipant participant, string topicName, DdsQos? qos = default, string? partition = null)
         {
+            ArgumentException.ThrowIfNullOrEmpty(topicName);
+
             _dataAvailableHandler = OnDataAvailable;
             _subscriptionMatchedHandler = OnSubscriptionMatched;
 
-            topicName ??= GetTopicNameFromAttribute();
             _topicName = topicName;
             _participant = participant;
 
-            // Use the provided QoS, one provided from the type attribute, or the default
-            DdsQos chosenQos = qos;
-
-            if (chosenQos is null)
-            {
-                var qosAttr = typeof(T).GetCustomAttribute<DdsQosAttribute>();
-                if (qosAttr != null)
-                {
-                    chosenQos = DdsQos.FromAttribute(qosAttr);
-                }
-                else
-                {
-                    // No attribute: leave every policy to Cyclone, matching what an empty
-                    // dds_create_qos() produced before QoS profiles existed.
-                    chosenQos = DdsQos.SystemDefault;
-                }
-            }
-
-            nint nativeQos = chosenQos.CreateNative();
+            // No profile: leave every policy to Cyclone, matching what an empty
+            // dds_create_qos() produced before QoS profiles existed.
+            nint nativeQos = (qos ?? DdsQos.SystemDefault).CreateNative();
 
             try
             {
@@ -240,13 +220,6 @@ namespace CycloneDDS.Runtime
         }
 
         public void SetFilter(Predicate<T>? filter) => _filter = filter;
-
-        private static string GetTopicNameFromAttribute()
-        {
-            var attr = typeof(T).GetCustomAttribute<DdsTopicAttribute>();
-            if (attr == null) throw new InvalidOperationException($"Type {typeof(T).Name} is missing [DdsTopic] attribute. You must specify topicName manually.");
-            return attr.TopicName;
-        }
 
         public DdsLoan<T> Take(int maxSamples = 32) => ReadOrTake(maxSamples, 0xFFFFFFFF, true);
         public DdsLoan<T> Read(int maxSamples = 32) => ReadOrTake(maxSamples, 0xFFFFFFFF, false);

@@ -110,7 +110,7 @@ namespace CycloneDDS.CodeGen.Tests
             var refs = new List<MetadataReference>
             {
                 MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
-                MetadataReference.CreateFromFile(typeof(DdsTopicAttribute).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(DdsStructAttribute).Assembly.Location),
                 MetadataReference.CreateFromFile(typeof(CycloneDDS.Core.NativeArena).Assembly.Location),
                 MetadataReference.CreateFromFile(typeof(CycloneDDS.Runtime.DdsParticipant).Assembly.Location),
                 MetadataReference.CreateFromFile(typeof(System.Linq.Enumerable).Assembly.Location),
@@ -257,7 +257,7 @@ namespace LibA {
 using CycloneDDS.Schema;
 using LibA;
 namespace LibB {
-    [DdsTopic(""RobotPath"")]
+    [DdsStruct]
     [DdsIdlFile(""RobotPath"")]
     public partial struct RobotPath { 
         public Point Start;
@@ -381,7 +381,7 @@ using CycloneDDS.Schema;
 using LibB;
 namespace LibC {
     [DdsIdlFile(""RobotFile"")]
-    [DdsTopic(""Robot"")]
+    [DdsStruct]
     public partial struct Robot { 
         public Path MyPath; 
     }

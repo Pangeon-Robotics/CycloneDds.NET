@@ -81,7 +81,7 @@ namespace CycloneDDS.CodeGen
             // Phase 5: Emit Combined C# Code
             foreach (var topic in types)
             {
-                if (topic.IsTopic || topic.IsStruct || topic.IsUnion)
+                if (topic.IsStruct || topic.IsUnion)
                 {
                     var safeName = topic.FullName;
                     if (safeName.StartsWith("<global namespace>.")) safeName = safeName.Replace("<global namespace>.", "");
@@ -228,8 +228,6 @@ namespace CycloneDDS.CodeGen
                                      typeInfo.IsStruct = true;
                                  if (symAttrs.Any(a => a.AttributeClass?.Name == "DdsUnionAttribute" || a.AttributeClass?.Name == "DdsUnion"))
                                      typeInfo.IsUnion = true;
-                                 if (symAttrs.Any(a => a.AttributeClass?.Name == "DdsTopicAttribute" || a.AttributeClass?.Name == "DdsTopic"))
-                                     typeInfo.IsTopic = true;
                                  if (symbol.TypeKind == TypeKind.Enum) typeInfo.IsEnum = true;
                                  
                                  return new IdlTypeDefinition { CSharpFullName = fullTypeName, TargetIdlFile = idlFile, TargetModule = idlModule, IsExternal = true, TypeInfo = typeInfo };

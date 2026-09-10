@@ -14,7 +14,6 @@ namespace CycloneDDS.CodeGen
         public List<AttributeInfo> Attributes { get; set; } = new List<AttributeInfo>();
         
         public bool IsEnum { get; set; }
-        public bool IsTopic { get; set; }
         public bool IsStruct { get; set; }
         public bool IsClass { get; set; } // Added to support managed classes
         public bool IsUnion { get; set; }
@@ -26,9 +25,6 @@ namespace CycloneDDS.CodeGen
 
         /// <summary>Bit width of the enum's underlying type. 8 for byte/sbyte, 16 for short/ushort, 32 for default (int/uint).</summary>
         public int EnumBitBound { get; set; } = 32;
-
-        /// <summary>Resolved DDS topic name. Populated by SchemaDiscovery when IsTopic is true.</summary>
-        public string? TopicName { get; set; }
 
         /// <summary>
         /// Optional format template from <c>[DdsTypeFormat("…")]</c>.

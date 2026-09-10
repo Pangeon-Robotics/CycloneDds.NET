@@ -20,7 +20,7 @@ namespace CycloneDDS.CodeGen.Tests
         {
             try { Directory.Delete(_tempDir, true); } catch {}
         }
-        
+
         private string CreateFile(string content)
         {
             var path = Path.Combine(_tempDir, "Tests_" + Guid.NewGuid().ToString("N") + ".cs");
@@ -43,33 +43,10 @@ namespace Test
 }");
             var discovery = new SchemaDiscovery();
             var types = discovery.DiscoverTopics(_tempDir);
-            
+
             var type = types.FirstOrDefault(t => t.Name == "SafePoint");
             Assert.NotNull(type);
             Assert.True(type.IsStruct);
-            Assert.False(type.IsTopic);
-        }
-
-        [Fact]
-        public void Discovery_DdsTopic_StillWorks()
-        {
-            CreateFile(@"
-using CycloneDDS.Schema;
-namespace Test
-{
-    [DdsTopic(""T1"")]
-    public struct T1
-    {
-        [DdsKey] public int Id;
-    }
-}");
-            var discovery = new SchemaDiscovery();
-            var types = discovery.DiscoverTopics(_tempDir);
-            
-            var type = types.FirstOrDefault(t => t.Name == "T1");
-            Assert.NotNull(type);
-            Assert.True(type.IsTopic);
-            Assert.False(type.IsStruct);
         }
 
         [Fact]
@@ -79,13 +56,13 @@ namespace Test
 using CycloneDDS.Schema;
 namespace Test
 {
-    [DdsTopic(""T1"")]
+    [DdsStruct]
     public struct T1
     {
         public int Id;
         public Nested1 N;
     }
-    
+
     [DdsStruct]
     public struct Nested1
     {
@@ -94,9 +71,9 @@ namespace Test
 }");
             var discovery = new SchemaDiscovery();
             var types = discovery.DiscoverTopics(_tempDir);
-            
+
             Assert.Equal(2, types.Count);
-            Assert.Contains(types, t => t.Name == "T1" && t.IsTopic);
+            Assert.Contains(types, t => t.Name == "T1" && t.IsStruct);
             Assert.Contains(types, t => t.Name == "Nested1" && t.IsStruct);
         }
     }

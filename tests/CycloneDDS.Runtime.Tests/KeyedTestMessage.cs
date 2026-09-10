@@ -5,7 +5,7 @@ using CycloneDDS.Core;
 
 namespace CycloneDDS.Runtime.Tests
 {
-    [DdsTopic("KeyedTestTopic")]
+    [DdsStruct]
     [DdsExtensibility(DdsExtensibilityKind.Final)]
     public partial struct KeyedTestMessage
     {

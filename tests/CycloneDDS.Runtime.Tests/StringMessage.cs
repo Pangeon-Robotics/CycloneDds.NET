@@ -2,7 +2,7 @@ using CycloneDDS.Schema;
 
 namespace CycloneDDS.Runtime.Tests
 {
-    [DdsTopic("StringMessageTopic")]
+    [DdsStruct]
     [DdsExtensibility(DdsExtensibilityKind.Appendable)]
     public partial struct StringMessage
     {

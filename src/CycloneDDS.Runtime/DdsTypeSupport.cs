@@ -34,7 +34,7 @@ namespace CycloneDDS.Runtime
                 {
                     throw new InvalidOperationException(
                         $"Type '{type.Name}' does not have a public static GetDescriptorOps() method. " +
-                        "Did you forget to add [DdsTopic] or [DdsStruct] attribute?");
+                        "Did you forget to add [DdsStruct] attribute?");
                 }
                 
                 // Create delegate for zero-overhead invocation
@@ -60,7 +60,7 @@ namespace CycloneDDS.Runtime
                 {
                     throw new InvalidOperationException(
                         $"Type '{type.Name}' does not have a public static GetKeyDescriptors() method. " +
-                        "Did you forget to add [DdsTopic] or [DdsStruct] attribute?");
+                        "Did you forget to add [DdsStruct] attribute?");
                 }
 
                 // Fast path: direct delegate binding.
@@ -142,7 +142,7 @@ namespace CycloneDDS.Runtime
                  {
                     throw new InvalidOperationException(
                         $"Type '{t.Name}' does not have a public MarshalFromNative(IntPtr, out T) method. " +
-                        "Did you forget to add [DdsTopic] or [DdsStruct] attribute?");
+                        "Did you forget to add [DdsStruct] attribute?");
                  }
 
                  return (NativeUnmarshalDelegate<T>)Delegate.CreateDelegate(typeof(NativeUnmarshalDelegate<T>), method);

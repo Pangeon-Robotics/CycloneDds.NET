@@ -64,8 +64,8 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Windows: full build, test and pack via the existing pack.ps1 pipeline
-  # (builds win-x64 native, builds core, runs runtime tests, packs both the
-  # CycloneDDS.NET and DdsMonitor packages, builds the examples). The linux-x64
+  # (builds win-x64 native, builds core, runs runtime tests, packs the
+  # CycloneDDS.NET package, builds the examples). The linux-x64
   # native artifacts produced above are downloaded first so the packed NuGet
   # carries both win-x64 and linux-x64 runtime assets.
   # ---------------------------------------------------------------------------
@@ -170,7 +170,7 @@ jobs:
   # works on Linux. Downloads the finished 'nuget-packages' artifact and consumes
   # it as a real NuGet package via build/test-package.sh: restore -> the bundled
   # Linux idlc runs code generation -> DllImport resolves libddsc.so -> pub/sub
-  # round-trip, then the ddsmonitor tool is installed and served. No native build.
+  # round-trip. No native build.
   # ---------------------------------------------------------------------------
   linux-verify:
     runs-on: ubuntu-latest
@@ -201,8 +201,8 @@ jobs:
   # ---------------------------------------------------------------------------
   # Publish to NuGet.org — ONLY on a version tag (vX.Y.Z), and ONLY after the
   # cross-platform package has been verified on both Windows (build) and Linux
-  # (linux-verify). Pushes the packages produced by the build job (both
-  # CycloneDDS.NET and CycloneDDS.NET.DdsMonitor) plus their symbol packages.
+  # (linux-verify). Pushes the package produced by the build job
+  # (CycloneDDS.NET) plus its symbol package.
   #
   # Requires a repository secret named NUGET_API_KEY:
   #   Repo -> Settings -> Secrets and variables -> Actions -> New repository secret.

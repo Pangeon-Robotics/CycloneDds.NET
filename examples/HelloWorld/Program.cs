@@ -6,7 +6,7 @@ using CycloneDDS.Schema;
 
 namespace HelloWorld
 {
-    [DdsTopic("HelloWorldTopic")]
+    [DdsStruct]
     public partial struct HelloWorldMessage
     {
         [DdsKey]
@@ -23,14 +23,14 @@ namespace HelloWorld
 
             // Create a participant
             using var participant = new DdsParticipant();
-            
+
             // Create a wrapper for topic registration handled internally by Writer/Reader
 
-            // Create a writer - topic name "HelloWorldTopic" automatically used from [DdsTopic] attribute
-            using var writer = new DdsWriter<HelloWorldMessage>(participant);
+            // Create a writer on topic "HelloWorldTopic"
+            using var writer = new DdsWriter<HelloWorldMessage>(participant, "HelloWorldTopic");
 
-            // Create a reader - topic name "HelloWorldTopic" automatically used from [DdsTopic] attribute
-            using var reader = new DdsReader<HelloWorldMessage>(participant);
+            // Create a reader on the same topic
+            using var reader = new DdsReader<HelloWorldMessage>(participant, "HelloWorldTopic");
 
             // Local helper to read synchronously
             void ReadSamples()

@@ -14,10 +14,7 @@
       "tests\\CycloneDDS.CodeGen.Tests\\CycloneDDS.CodeGen.Tests.csproj",
       "tests\\CycloneDDS.Core.Tests\\CycloneDDS.Core.Tests.csproj",
       "tests\\CycloneDDS.Schema.Tests\\CycloneDDS.Schema.Tests.csproj",
-      "tests\\CycloneDDS.Native.Verify\\CycloneDDS.Native.Verify.csproj",
-      "tests\\FeatureDemo.Tests\\FeatureDemo.Tests.csproj",
-      "tools\\DdsMonitor\\DdsMonitor.Engine\\DdsMonitor.Engine.csproj",
-      "tools\\DdsMonitor\\DdsMonitor.Blazor\\DdsMonitor.csproj"
+      "tests\\CycloneDDS.Native.Verify\\CycloneDDS.Native.Verify.csproj"
     ]
   }
 }

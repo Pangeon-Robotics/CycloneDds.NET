@@ -250,13 +250,13 @@ namespace Test
         }
 
         [Fact]
-        public void SchemaDiscovery_DdsTypeFormat_WorksOnDdsTopic()
+        public void SchemaDiscovery_DdsTypeFormat_WorksOnKeyedStruct()
         {
             CreateFile(@"
 using CycloneDDS.Schema;
 namespace Test
 {
-    [DdsTopic(""MyTopic"")]
+    [DdsStruct]
     [DdsTypeFormat(""{X:0.00:Number}, {Y:0.00:Number}"")]
     public struct PositionTopic
     {
