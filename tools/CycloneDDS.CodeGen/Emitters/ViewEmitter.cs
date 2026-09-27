@@ -152,7 +152,7 @@ namespace CycloneDDS.CodeGen.Emitters
             // C# fixed-size buffer (e.g. `public fixed byte Buf[64];`)
             else if (field.IsFixedSizeBuffer)
             {
-                EmitFixedSizeBufferProperty(sb, field, indent, nativeFieldName);
+                EmitFixedSizeBufferProperty(sb, field, indent, nativeFieldName, registry);
             }
             // Primitive
             else if (IsPrimitive(field.TypeName, registry))
@@ -500,6 +500,24 @@ namespace CycloneDDS.CodeGen.Emitters
                     sb.AppendLine($"{indent}    }}");
                     sb.AppendLine($"{indent}}}");
                 }
+                else if (member.IsFixedSizeBuffer && GetStructBufferElementFullName(member, registry) != null)
+                {
+                    // Fixed array of structs inside the native union struct: backed by an [InlineArray]
+                    // buffer, so expose a count plus a per-element view instead of a span.
+                    string bufElem = GetStructBufferElementFullName(member, registry)!;
+                    sb.AppendLine($"{indent}/// <summary>Gets the number of {memberName} elements.</summary>");
+                    sb.AppendLine($"{indent}public int {propName}As{caseName}Count => {member.FixedSize};");
+                    sb.AppendLine();
+                    sb.AppendLine($"{indent}/// <summary>Gets {memberName} element at index as a view. Throws if discriminator mismatch.</summary>");
+                    sb.AppendLine($"{indent}public unsafe {bufElem}View Get{propName}As{caseName}(int index)");
+                    sb.AppendLine($"{indent}{{");
+                    sb.AppendLine($"{indent}    if (index < 0 || index >= {member.FixedSize})");
+                    sb.AppendLine($"{indent}        throw new ArgumentOutOfRangeException(nameof(index));");
+                    sb.AppendLine($"{indent}    if ({conditionExpr})");
+                    sb.AppendLine($"{indent}        return new {bufElem}View(({bufElem}_Native*)&_ptr->{fieldName}._u.{caseField} + index);");
+                    sb.AppendLine($"{indent}    throw new InvalidOperationException($\"Union discriminator mismatch: Expected {caseName}, but got {propName}Kind\");");
+                    sb.AppendLine($"{indent}}}");
+                }
                 else if (member.IsFixedSizeBuffer)
                 {
                     // C# fixed-size buffer (e.g. `public fixed float EightFloats[8]`) inside the native union struct.
@@ -615,8 +633,27 @@ namespace CycloneDDS.CodeGen.Emitters
              sb.AppendLine($"{indent}}}");
         }
 
-        private void EmitFixedSizeBufferProperty(StringBuilder sb, FieldInfo field, string indent, string nativeFieldName)
+        private void EmitFixedSizeBufferProperty(StringBuilder sb, FieldInfo field, string indent, string nativeFieldName, GlobalTypeRegistry? registry = null)
         {
+             // Fixed array of structs: the native field is an [InlineArray] buffer, not a T*.
+             // Expose it like a struct sequence – a count plus a per-element view.
+             var structElem = GetStructBufferElementFullName(field, registry);
+             if (structElem != null)
+             {
+                 sb.AppendLine($"{indent}/// <summary>Gets the number of {field.Name} elements.</summary>");
+                 sb.AppendLine($"{indent}public int {field.Name}Count => {field.FixedSize};");
+                 sb.AppendLine();
+                 sb.AppendLine($"{indent}/// <summary>Gets {field.Name} element at index as a view (zero-copy).</summary>");
+                 sb.AppendLine($"{indent}public unsafe {structElem}View Get{field.Name}(int index)");
+                 sb.AppendLine($"{indent}{{");
+                 sb.AppendLine($"{indent}    if (index < 0 || index >= {field.FixedSize})");
+                 sb.AppendLine($"{indent}        throw new ArgumentOutOfRangeException(nameof(index));");
+                 sb.AppendLine();
+                 sb.AppendLine($"{indent}    return new {structElem}View(({structElem}_Native*)&_ptr->{nativeFieldName} + index);");
+                 sb.AppendLine($"{indent}}}");
+                 return;
+             }
+
              // For a C# fixed buffer `public fixed T Buf[N]` in the native struct,
              // `_ptr->Buf` returns a T* to the first element – wrap as ReadOnlySpan<T>.
              sb.AppendLine($"{indent}/// <summary>Gets {field.Name} as ReadOnlySpan (zero-copy).</summary>");
@@ -728,6 +765,15 @@ namespace CycloneDDS.CodeGen.Emitters
 
             if (field.IsFixedSizeBuffer)
             {
+                var structElem = GetStructBufferElementFullName(field, registry);
+                if (structElem != null)
+                {
+                    // Fixed array of structs: the managed field is an [InlineArray]; convert element-wise.
+                    sb.AppendLine($"{indent}for (int __i = 0; __i < {field.FixedSize}; __i++)");
+                    sb.AppendLine($"{indent}    target.{targetProp}[__i] = this.Get{propName}(__i).ToManaged();");
+                    return;
+                }
+
                 // Copy from ReadOnlySpan (view) into the local managed fixed buffer.
                 sb.AppendLine($"{indent}{{");
                 sb.AppendLine($"{indent}    var __srcSpan = this.{propName};");
@@ -905,6 +951,26 @@ namespace CycloneDDS.CodeGen.Emitters
                  return name.Substring(start + 1, end - start - 1).Trim();
             }
             return name;
+        }
+
+        /// <summary>
+        /// Returns the fully-qualified element type name when the field is a fixed-size array of a
+        /// user struct or union (emitted as an <c>[InlineArray]</c> buffer in the native struct),
+        /// otherwise null.
+        /// </summary>
+        private string? GetStructBufferElementFullName(FieldInfo field, GlobalTypeRegistry? registry)
+        {
+             if (!field.IsFixedSizeBuffer) return null;
+
+             TypeInfo? elem = field.Type;
+             if (elem == null && registry != null && registry.TryGetDefinition(field.TypeName, out var def))
+             {
+                 elem = def?.TypeInfo;
+             }
+
+             if (elem == null || elem.IsEnum) return null;
+             if (!elem.IsStruct && !elem.IsUnion) return null;
+             return elem.FullName;
         }
 
         private bool IsFixedArray(FieldInfo field)
