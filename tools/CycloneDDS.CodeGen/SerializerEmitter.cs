@@ -355,6 +355,21 @@ namespace CycloneDDS.CodeGen
              // Fixed-size buffers: inline memcpy, zero allocation.
              if (field.IsFixedSizeBuffer)
              {
+                 var structElem = GetStructBufferElement(field);
+                 if (structElem != null)
+                 {
+                     // Fixed array of structs: the native element layout differs from the managed one
+                     // (bool -> byte, string -> IntPtr, ...), so marshal element by element.
+                     sb.AppendLine($"            {{");
+                     sb.AppendLine($"                for (int __i = 0; __i < {field.FixedSize}; ++__i)");
+                     sb.AppendLine($"                {{");
+                     sb.AppendLine($"                    var __item = {sourceAccess}[__i];");
+                     sb.AppendLine($"                    {structElem.FullName}.MarshalToNative(in __item, ref {targetAccess}[__i], ref arena);");
+                     sb.AppendLine($"                }}");
+                     sb.AppendLine($"            }}");
+                     return;
+                 }
+
                  if (field.IsInlineArray)
                  {
                      // ME1-T02: [InlineArray] source – use Unsafe.AsPointer (no 'fixed' on InlineArray)
@@ -773,6 +788,19 @@ namespace CycloneDDS.CodeGen
              // Fixed-size buffers: inline memcpy, zero allocation.
              if (field.IsFixedSizeBuffer)
              {
+                 var structElem = GetStructBufferElement(field);
+                 if (structElem != null)
+                 {
+                     // Fixed array of structs: unmarshal element by element (see EmitFieldMarshal).
+                     sb.AppendLine($"            {{");
+                     sb.AppendLine($"                for (int __i = 0; __i < {field.FixedSize}; ++__i)");
+                     sb.AppendLine($"                {{");
+                     sb.AppendLine($"                    {structElem.FullName}.MarshalFromNative(ref {targetAccess}[__i], in {sourceAccess}[__i]);");
+                     sb.AppendLine($"                }}");
+                     sb.AppendLine($"            }}");
+                     return;
+                 }
+
                  if (field.IsInlineArray)
                  {
                      // ME1-T02: [InlineArray] target – use Unsafe.AsPointer (no 'fixed' on InlineArray)
@@ -1076,11 +1104,75 @@ namespace CycloneDDS.CodeGen
             }
         }
 
+        /// <summary>Resolves (and caches) a field's user-defined type through the global registry.</summary>
+        private TypeInfo? ResolveFieldType(FieldInfo field)
+        {
+            if (field.Type != null) return field.Type;
+            if (_registry != null && _registry.TryGetDefinition(field.TypeName, out var def) && def?.TypeInfo != null)
+            {
+                field.Type = def.TypeInfo;
+            }
+            return field.Type;
+        }
+
+        /// <summary>
+        /// Returns the element type when the field is a fixed-size array of a user struct or union.
+        /// C# <c>fixed</c> buffers only accept primitive element types, so such fields are emitted
+        /// as an <c>[InlineArray(N)]</c> buffer type in the native struct instead.
+        /// </summary>
+        private TypeInfo? GetStructBufferElement(FieldInfo field)
+        {
+            if (!field.IsFixedSizeBuffer) return null;
+            var elem = ResolveFieldType(field);
+            if (elem == null || elem.IsEnum) return null;
+            return (elem.IsStruct || elem.IsUnion) ? elem : null;
+        }
+
+        /// <summary>Name of the generated <c>[InlineArray]</c> buffer type for a fixed array of structs.</summary>
+        private static string GetInlineArrayTypeName(FieldInfo field) => $"{field.Name}_Array";
+
+        /// <summary>
+        /// True when marshalling a value of this type needs arena space beyond the native struct itself
+        /// (strings, sequences, optionals, or a nested type that needs one).
+        /// </summary>
+        private bool IsTypeDynamic(TypeInfo type, HashSet<string> visiting)
+        {
+            if (!visiting.Add(type.FullName)) return false;
+
+            // Externally referenced types carry no field list; assume dynamic (conservative).
+            if (type.Fields.Count == 0) return true;
+
+            foreach (var f in type.Fields)
+            {
+                if (IsOptional(f)) return true;
+
+                if (f.IsFixedSizeBuffer)
+                {
+                    var bufElem = GetStructBufferElement(f);
+                    if (bufElem != null && IsTypeDynamic(bufElem, visiting)) return true;
+                    continue;
+                }
+
+                if (f.TypeName == "string" || f.TypeName == "System.String") return true;
+                if (f.TypeName.StartsWith("List<") || f.TypeName.StartsWith("System.Collections.Generic.List<") ||
+                    f.TypeName.EndsWith("[]") || f.TypeName.StartsWith("BoundedSeq")) return true;
+
+                var ft = ResolveFieldType(f);
+                if (ft != null && !ft.IsEnum && (ft.IsStruct || ft.IsUnion) && IsTypeDynamic(ft, visiting)) return true;
+            }
+
+            return false;
+        }
+
         private bool IsDynamic(FieldInfo field)
         {
-            // Fixed-size buffers have a compile-time constant size and are embedded
-            // inline in the native struct; they are never dynamic.
-            if (field.IsFixedSizeBuffer) return false;
+            // Fixed-size buffers are embedded inline in the native struct, so the buffer itself is
+            // never dynamic. A buffer of structs is dynamic when its element type needs arena space.
+            if (field.IsFixedSizeBuffer)
+            {
+                var bufElem = GetStructBufferElement(field);
+                return bufElem != null && IsTypeDynamic(bufElem, new HashSet<string>());
+            }
 
             if (field.TypeName == "string" || field.TypeName == "System.String") return true;
             if (field.TypeName.StartsWith("List<") || field.TypeName.EndsWith("[]") || field.TypeName.StartsWith("System.Collections.Generic.List<")) return true;
@@ -1108,6 +1200,25 @@ namespace CycloneDDS.CodeGen
                  fieldType = def?.TypeInfo; if (fieldType != null) field.Type = fieldType;
              }
              
+             var structBufElem = GetStructBufferElement(field);
+             if (structBufElem != null)
+             {
+                 // Fixed array of structs: each element may carry its own dynamic payload.
+                 string elemFullName = structBufElem.FullName;
+                 sb.AppendLine($"            {{");
+                 sb.AppendLine($"                for (int __i = 0; __i < {field.FixedSize}; ++__i)");
+                 sb.AppendLine($"                {{");
+                 sb.AppendLine($"                    var __elemDyn = {elemFullName}.GetNativeSize(source.{field.Name}[__i]) - Unsafe.SizeOf<{elemFullName}_Native>();");
+                 sb.AppendLine($"                    if (__elemDyn > 0)");
+                 sb.AppendLine($"                    {{");
+                 sb.AppendLine($"                        currentOffset = (currentOffset + 7) & ~7;");
+                 sb.AppendLine($"                        currentOffset += __elemDyn;");
+                 sb.AppendLine($"                    }}");
+                 sb.AppendLine($"                }}");
+                 sb.AppendLine($"            }}");
+                 return;
+             }
+
              if (typeName == "string" || typeName == "System.String")
              {
                  sb.AppendLine($"            if (source.{field.Name} != null)"); 
@@ -1319,14 +1430,26 @@ namespace CycloneDDS.CodeGen
                 sb.AppendLine("    [StructLayout(LayoutKind.Explicit)]");
                 sb.AppendLine($"    public unsafe struct {type.Name}_Union_Native");
                 sb.AppendLine("    {");
+                var unionInlineArrays = new List<FieldInfo>();
                 foreach (var field in type.Fields)
                 {
                     if (field.HasAttribute("DdsDiscriminator")) continue;
 
                     if (field.IsFixedSizeBuffer)
                     {
-                        sb.AppendLine($"        [FieldOffset(0)]");
-                        sb.AppendLine($"        public fixed {field.TypeName} {field.Name}[{field.FixedSize}];");
+                        var structElem = GetStructBufferElement(field);
+                        if (structElem != null)
+                        {
+                            // Fixed array of structs: 'fixed' is not legal, use an [InlineArray] buffer type.
+                            sb.AppendLine($"        [FieldOffset(0)]");
+                            sb.AppendLine($"        public {GetInlineArrayTypeName(field)} {field.Name};");
+                            unionInlineArrays.Add(field);
+                        }
+                        else
+                        {
+                            sb.AppendLine($"        [FieldOffset(0)]");
+                            sb.AppendLine($"        public fixed {field.TypeName} {field.Name}[{field.FixedSize}];");
+                        }
                     }
                     else
                     {
@@ -1343,6 +1466,10 @@ namespace CycloneDDS.CodeGen
                             sb.AppendLine($"        public {nativeType} {field.Name};");
                         }
                     }
+                }
+                foreach (var field in unionInlineArrays)
+                {
+                    EmitInlineArrayType(sb, field);
                 }
                 sb.AppendLine("    }");
             }
@@ -1351,11 +1478,22 @@ namespace CycloneDDS.CodeGen
                 sb.AppendLine("    [StructLayout(LayoutKind.Sequential)]");
                 sb.AppendLine($"    public unsafe struct {type.Name}_Native");
                 sb.AppendLine("    {");
+                var inlineArrays = new List<FieldInfo>();
                 foreach (var field in type.Fields)
                 {
                     if (field.IsFixedSizeBuffer)
                     {
-                        sb.AppendLine($"        public fixed {field.TypeName} {field.Name}[{field.FixedSize}];");
+                        var structElem = GetStructBufferElement(field);
+                        if (structElem != null)
+                        {
+                            // Fixed array of structs: 'fixed' is not legal, use an [InlineArray] buffer type.
+                            sb.AppendLine($"        public {GetInlineArrayTypeName(field)} {field.Name};");
+                            inlineArrays.Add(field);
+                        }
+                        else
+                        {
+                            sb.AppendLine($"        public fixed {field.TypeName} {field.Name}[{field.FixedSize}];");
+                        }
                     }
                     else
                     {
@@ -1371,8 +1509,30 @@ namespace CycloneDDS.CodeGen
                         }
                     }
                 }
+                foreach (var field in inlineArrays)
+                {
+                    EmitInlineArrayType(sb, field);
+                }
                 sb.AppendLine("    }");
             }
+        }
+
+        /// <summary>
+        /// Emits the nested <c>[InlineArray(N)]</c> buffer type backing a fixed-size array of structs.
+        /// Declared inside the owning native struct so the name cannot collide across types.
+        /// </summary>
+        private void EmitInlineArrayType(StringBuilder sb, FieldInfo field)
+        {
+            var elem = GetStructBufferElement(field);
+            if (elem == null) return;
+
+            sb.AppendLine();
+            sb.AppendLine($"        /// <summary>Inline storage for the {field.FixedSize}-element {field.Name} array.</summary>");
+            sb.AppendLine($"        [InlineArray({field.FixedSize})]");
+            sb.AppendLine($"        public struct {GetInlineArrayTypeName(field)}");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            private {elem.FullName}_Native _element0;");
+            sb.AppendLine("        }");
         }
 
         /// <summary>Returns the C# cast expression matching an enum's bit bound (e.g. "(byte)", "(ushort)", "(int)").</summary>
