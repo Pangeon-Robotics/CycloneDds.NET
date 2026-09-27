@@ -22,7 +22,7 @@ namespace AppLib
         public string msg;
     }
 
-    [DdsTopic("AppLib::ExtendedPoint")]
+    [DdsStruct]
     [DdsExtensibility(DdsExtensibilityKind.Final)]
     public partial struct ExtendedPoint
     {

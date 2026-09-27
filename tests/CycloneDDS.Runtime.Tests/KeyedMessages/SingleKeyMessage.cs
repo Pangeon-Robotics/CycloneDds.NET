@@ -6,7 +6,7 @@ namespace CycloneDDS.Runtime.Tests.KeyedMessages
     /// Single primitive key - most common DDS keyed topic pattern.
     /// Example: Vehicle tracking by VehicleId.
     /// </summary>
-    [DdsTopic("SingleKeyTopic")]
+    [DdsStruct]
     public partial struct SingleKeyMessage
     {
         [DdsKey, DdsId(0)]

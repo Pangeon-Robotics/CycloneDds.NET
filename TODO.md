@@ -1,3 +1,20 @@
+[TODO] Follow-up from the core cleanup (2026-09-10)
+
+Docs still describing [DdsTopic], [DdsQos], FeatureDemo or DdsMonitor, and not yet covering DdsHub
+(incl. the Godot autoload wrapper), the required topicName on DdsReader/DdsWriter, or the QoS enums
+moving from CycloneDDS.Schema to CycloneDDS.Runtime:
+ - README.md, DetailedOverview.md, IDL-GENERATION.md, IDL-IMPORT.md, RELEASE-GUIDE.md, CHANGELOG.md
+ - docs/IdlImport-design.md, docs/MARSHAL-DESIGN.md, docs/nugetizing/ONBOARDING.md,
+   docs/nugetizing/TASK-DETAIL.md
+ - .archive/docs/ADVANCED-IDL-GENERATION-DESIGN.md, .archive/docs/SENDER-TRACKING-DESIGN.md
+ - This file: the self-send topics, ECS panel and quick-filter entries below belong to the
+   removed DdsMonitor.
+
+fr_hmi_operator is not on DdsHub yet: scripts/Dds.cs and scripts/dds/ still hold the original
+copies, and Boot.cs gets DdsLiveliness from CycloneDDS.Schema (now CycloneDDS.Runtime).
+
+
+
 [BUG] The IDL codegen has a bug with non-sequential enums — value gap at 3  causes the enum entries after to use `@value()`
 annotations which confuses the idlc union case generator.
 The IDL generator is using the field's position in the struct (0, 1, 2, 3, 4) instead of the actual discriminant

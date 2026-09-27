@@ -2,7 +2,7 @@ using CycloneDDS.Schema;
 
 namespace CycloneDDS.Runtime.Tests.KeyedMessages
 {
-    [DdsTopic("MixedKeyMessage")]
+    [DdsStruct]
     public partial struct MixedKeyMessage
     {
         [DdsKey]

@@ -16,7 +16,7 @@ using DdsGuid = CycloneDDS.Runtime.Interop.DdsGuid;
 namespace CycloneDDS.Runtime.Tests
 {
     // Need to define a message type for tests if not available globally
-    [DdsTopic("SenderTrackingTestMsg")]
+    [DdsStruct]
     public partial struct SenderTrackingTestMsg
     {
         [DdsId(0), DdsKey]

@@ -9,7 +9,7 @@
       - native asset resolution  (runtimes/<rid>/native/libddsc.so | ddsc.dll)
       - build integration        (buildTransitive/ targets + build/ props)
       - the bundled IDL compiler (tools/idlc | idlc.exe) run during code-gen
-    It declares a [DdsTopic] so code generation actually runs, then does a
+    It declares a [DdsStruct] so code generation actually runs, then does a
     publish/subscribe round-trip and asserts the payload.
 
     Not part of any solution filter. Build it explicitly after packing, passing

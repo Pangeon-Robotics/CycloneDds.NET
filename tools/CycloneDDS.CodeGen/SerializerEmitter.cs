@@ -488,7 +488,7 @@ namespace CycloneDDS.CodeGen
              {
                  EmitSequenceMarshal(sb, field, sourceAccess, targetAccess);
              }
-             else if (fieldType != null && (fieldType.IsStruct || fieldType.IsUnion || fieldType.IsTopic) && !fieldType.IsEnum)
+             else if (fieldType != null && (fieldType.IsStruct || fieldType.IsUnion) && !fieldType.IsEnum)
              {
                  string typeName = field.TypeName;
                  sb.AppendLine($"            var __{field.Name}_temp = {sourceAccess};");
@@ -884,7 +884,7 @@ namespace CycloneDDS.CodeGen
              {
                  EmitSequenceUnmarshal(sb, field, sourceAccess, targetAccess);
              }
-             else if (fieldType != null && (fieldType.IsStruct || fieldType.IsUnion || fieldType.IsTopic) && !fieldType.IsEnum)
+             else if (fieldType != null && (fieldType.IsStruct || fieldType.IsUnion) && !fieldType.IsEnum)
              {
                  string typeName = field.TypeName;
                  sb.AppendLine($"            var __{field.Name}_target = new {typeName}();");
@@ -1093,7 +1093,6 @@ namespace CycloneDDS.CodeGen
 
             if (fieldType != null && fieldType.IsStruct && !fieldType.IsEnum) return true;
             if (fieldType != null && fieldType.IsUnion) return true;
-            if (fieldType != null && fieldType.IsTopic) return true;
             if (IsOptional(field)) return true;
             return false;
         }
@@ -1160,7 +1159,7 @@ namespace CycloneDDS.CodeGen
                  }
                  sb.AppendLine($"            }}");
              }
-             else if (fieldType != null && (fieldType.IsStruct || fieldType.IsUnion || fieldType.IsTopic) && !fieldType.IsEnum)
+             else if (fieldType != null && (fieldType.IsStruct || fieldType.IsUnion) && !fieldType.IsEnum)
              {
                  // Nested Struct or Union
                  string fullTypeName = fieldType.FullName;
@@ -1257,7 +1256,7 @@ namespace CycloneDDS.CodeGen
              if (fieldType != null)
              {
                  if (fieldType.IsEnum) return 4; // idlc always allocates 4 bytes for enum fields regardless of @bit_bound.
-                 if (fieldType.IsStruct || fieldType.IsUnion || fieldType.IsTopic)
+                 if (fieldType.IsStruct || fieldType.IsUnion)
                  {
                      int max = 1;
                      foreach(var f in fieldType.Fields)

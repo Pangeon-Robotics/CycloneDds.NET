@@ -10,7 +10,7 @@ namespace CycloneDDS.Runtime.Tracking
     /// Application-level identity_broadcast by each participant.
     /// Used to correlate DDS publication handles to user metadata.
     /// </summary>
-    [DdsTopic("__FcdcSenderIdentity")]
+    [DdsStruct]
     [DdsExtensibility(DdsExtensibilityKind.Appendable)]
     public partial struct SenderIdentity
     {

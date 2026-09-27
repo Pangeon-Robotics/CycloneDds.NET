@@ -2,7 +2,7 @@ using CycloneDDS.Schema;
 
 namespace CycloneDDS.Runtime.Tests
 {
-    [DdsTopic("TestMessageTopic")]
+    [DdsStruct]
     public partial struct TestMessage
     {
         public int Id;

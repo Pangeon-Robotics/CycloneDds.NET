@@ -53,12 +53,12 @@ namespace CycloneDDS.CodeGen.Tests
         }
 
         [Fact]
-        public void SchemaDiscovery_FindsTypes_WithDdsTopic()
+        public void SchemaDiscovery_FindsTypes_WithDdsStruct()
         {
             CreateFile("TestTopic.cs", @"
 using CycloneDDS.Schema;
 namespace MyNamespace {
-    [DdsTopic(""MyTopic"")]
+    [DdsStruct]
     public struct MyTopicStruct { }
 }");
 
@@ -72,7 +72,7 @@ namespace MyNamespace {
         }
 
         [Fact]
-        public void SchemaDiscovery_IgnoresTypes_WithoutDdsTopic()
+        public void SchemaDiscovery_IgnoresTypes_WithoutDdsAttribute()
         {
             CreateFile("NotATopic.cs", @"
 namespace MyNamespace {
@@ -91,7 +91,7 @@ namespace MyNamespace {
             CreateFile("NestedTopic.cs", @"
 using CycloneDDS.Schema;
 namespace A.B {
-    [DdsTopic(""Nested"")]
+    [DdsStruct]
     public class NestedTopic { }
 }");
 
@@ -108,7 +108,7 @@ namespace A.B {
             CreateFile("FileScopedTopic.cs", @"
 using CycloneDDS.Schema;
 namespace A.B.C;
-[DdsTopic(""FileScoped"")]
+[DdsStruct]
 public class FileScopedTopic { }
 ");
 
@@ -124,7 +124,7 @@ public class FileScopedTopic { }
         {
              CreateFile("GenTopic.cs", @"
 using CycloneDDS.Schema;
-[DdsTopic(""Gen"")]
+[DdsStruct]
 public struct GenTopic { }
 ");
             var outputDir = Path.Combine(_tempDir, "Output");
@@ -141,7 +141,7 @@ public struct GenTopic { }
         {
              CreateFile("MainTopic.cs", @"
 using CycloneDDS.Schema;
-[DdsTopic(""Main"")]
+[DdsStruct]
 public struct MainTopic { }
 ");
             var outputDir = Path.Combine(_tempDir, "MainOutput");
@@ -159,7 +159,7 @@ public struct MainTopic { }
 using CycloneDDS.Schema;
 namespace MyNamespace {
     public class Outer {
-        [DdsTopic(""NestedClass"")]
+        [DdsStruct]
         public class Inner { }
     }
 }");
@@ -178,10 +178,10 @@ namespace MyNamespace {
             CreateFile("MultipleTopics.cs", @"
 using CycloneDDS.Schema;
 namespace MyNamespace {
-    [DdsTopic(""Topic1"")]
+    [DdsStruct]
     public struct Topic1 { }
 
-    [DdsTopic(""Topic2"")]
+    [DdsStruct]
     public struct Topic2 { }
 }");
 
@@ -198,7 +198,7 @@ namespace MyNamespace {
         {
             CreateFile("CombinedTopic.cs", @"
 using CycloneDDS.Schema;
-[DdsTopic(""Combined"")]
+[DdsStruct]
 public struct CombinedTopic { }
 ");
             var outputDir = Path.Combine(_tempDir, "CombinedOutput");

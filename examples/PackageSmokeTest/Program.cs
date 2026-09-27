@@ -6,11 +6,11 @@ using CycloneDDS.Schema;
 
 namespace PackageSmokeTest
 {
-    // Declaring a [DdsTopic] forces the package's code generator (idlc) to run at
+    // Declaring a [DdsStruct] forces the package's code generator (idlc) to run at
     // build time — so a successful build already proves the packaged tooling works
     // on this OS. Main() then proves the runtime native (libddsc.so / ddsc.dll)
     // works by doing a real publish -> subscribe round-trip.
-    [DdsTopic("PackageSmokeTest_SmokeSample")]
+    [DdsStruct]
     public partial struct SmokeSample
     {
         [DdsKey] public int Id;
@@ -20,14 +20,16 @@ namespace PackageSmokeTest
 
     public static class Program
     {
+        private const string Topic = "PackageSmokeTest_SmokeSample";
+
         public static int Main()
         {
             Console.WriteLine($"[smoke] {RuntimeInformation.OSDescription} / {RuntimeInformation.ProcessArchitecture}");
             try
             {
                 using var participant = new DdsParticipant();
-                using var writer = new DdsWriter<SmokeSample>(participant);
-                using var reader = new DdsReader<SmokeSample>(participant);
+                using var writer = new DdsWriter<SmokeSample>(participant, Topic);
+                using var reader = new DdsReader<SmokeSample>(participant, Topic);
 
                 // Wait for the reader/writer to discover each other so the first
                 // sample isn't dropped. This also exercises the matched-status

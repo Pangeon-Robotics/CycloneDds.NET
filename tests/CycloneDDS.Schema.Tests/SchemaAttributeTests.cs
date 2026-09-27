@@ -8,11 +8,11 @@ namespace CycloneDDS.Schema.Tests
 {
     public class SchemaAttributeTests
     {
-        [DdsTopic("TestStruct")]
-        struct TestStructTopic { }
+        [DdsStruct]
+        struct TestStruct { }
 
-        [DdsTopic("TestClass")]
-        class TestClassTopic { }
+        [DdsStruct]
+        class TestClass { }
 
         struct TestKeyStruct
         {
@@ -33,19 +33,17 @@ namespace CycloneDDS.Schema.Tests
         }
 
         [Fact]
-        public void DdsTopic_CanBeAppliedToStruct()
+        public void DdsStruct_CanBeAppliedToStruct()
         {
-            var attr = typeof(TestStructTopic).GetCustomAttribute<DdsTopicAttribute>();
+            var attr = typeof(TestStruct).GetCustomAttribute<DdsStructAttribute>();
             Assert.NotNull(attr);
-            Assert.Equal("TestStruct", attr.TopicName);
         }
 
         [Fact]
-        public void DdsTopic_CanBeAppliedToClass()
+        public void DdsStruct_CanBeAppliedToClass()
         {
-            var attr = typeof(TestClassTopic).GetCustomAttribute<DdsTopicAttribute>();
+            var attr = typeof(TestClass).GetCustomAttribute<DdsStructAttribute>();
             Assert.NotNull(attr);
-            Assert.Equal("TestClass", attr.TopicName);
         }
 
         [Fact]
@@ -96,48 +94,6 @@ namespace CycloneDDS.Schema.Tests
 
             Assert.Throws<InvalidOperationException>(() => seq.Add(4));
             Assert.Equal(3, seq.Count);
-        }
-
-        [Fact]
-        public void DdsQos_StoresSettings()
-        {
-            var attr = new DdsQosAttribute
-            {
-                Reliability = DdsReliability.Reliable,
-                Durability = DdsDurability.TransientLocal
-            };
-
-            Assert.Equal(DdsReliability.Reliable, attr.Reliability);
-            Assert.Equal(DdsDurability.TransientLocal, attr.Durability);
-        }
-
-        [Fact]
-        public void DdsTopic_Constructor_ThrowsOnNullOrWhitespace()
-        {
-            // ME1-T03: the constructor no longer throws – null/whitespace topic names are
-            // valid and signal "derive from type FullName" at runtime.
-            // Verify that the old behaviour (throwing) is NOT present.
-            var noArg  = new DdsTopicAttribute();          // no throw expected
-            var nullArg = new DdsTopicAttribute(null);     // no throw expected
-
-            Assert.Null(noArg.TopicName);
-            Assert.Null(nullArg.TopicName);
-        }
-
-        [Fact]
-        public void DdsTopic_NoArgConstructor_IsValid()
-        {
-            // ME1-T03 success condition 1: new DdsTopicAttribute() is valid, TopicName is null.
-            var attr = new DdsTopicAttribute();
-            Assert.Null(attr.TopicName);
-        }
-
-        [Fact]
-        public void DdsTopic_ExplicitName_IsPreserved()
-        {
-            // ME1-T03 success condition 3: explicit name is kept unchanged.
-            var attr = new DdsTopicAttribute("ExplicitName");
-            Assert.Equal("ExplicitName", attr.TopicName);
         }
     }
 }

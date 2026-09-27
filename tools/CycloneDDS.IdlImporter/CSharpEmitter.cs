@@ -261,17 +261,8 @@ public class CSharpEmitter
 
     private void EmitStruct(StringBuilder sb, JsonTypeDefinition type, string typeName, string indent)
     {
-        bool hasIdsKey = type.Members.Any(m => m.IsKey);
-        
-        if (hasIdsKey)
-        {
-             sb.AppendLine($"{indent}[DdsTopic(\"{type.Name}\")]"); 
-        }
-        else
-        {
-             sb.AppendLine($"{indent}[DdsStruct]");
-        }
-        
+        sb.AppendLine($"{indent}[DdsStruct]");
+
         if (!string.IsNullOrEmpty(type.Extensibility))
         {
             string kind = type.Extensibility.ToLower() switch 

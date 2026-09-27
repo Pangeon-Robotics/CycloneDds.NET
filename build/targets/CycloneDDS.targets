@@ -77,7 +77,7 @@
 
   <!-- Second-level gate: even among projects that opt in (direct package reference), only
        run the generator when the project actually declares something it would emit. The
-       generator's discovery rule is "type is [DdsTopic]/[DdsStruct]/[DdsUnion] OR is an enum"
+       generator's discovery rule is "type is [DdsStruct]/[DdsUnion] OR is an enum"
        (enums always get IDL + a DdsIdlMapping, which is how enum-only contract assemblies
        like GizmoMap.Contracts feed downstream topics). So we skip only when a project has
        NEITHER — a fast in-process source scan, no extra dotnet launch. This mirrors the

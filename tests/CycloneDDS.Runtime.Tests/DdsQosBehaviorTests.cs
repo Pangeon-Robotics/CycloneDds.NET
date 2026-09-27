@@ -58,14 +58,14 @@ namespace CycloneDDS.Runtime.Tests
         private static string Topic(string name) => $"QosMatch_{name}";
 
         /// <summary>
-        /// Regression guard for the undecorated path. <see cref="TestMessage"/> carries no
-        /// <c>[DdsQos]</c>, so a reader built without an explicit profile must fall through to
-        /// <see cref="DdsQos.SystemDefault"/> and pick up Cyclone's reader default of
-        /// BestEffort — which is what a bare <c>dds_create_qos()</c> produced before QoS
-        /// profiles existed, and which a BestEffort writer therefore satisfies.
+        /// Regression guard for the no-profile path. A reader built without an explicit
+        /// profile must fall through to <see cref="DdsQos.SystemDefault"/> and pick up
+        /// Cyclone's reader default of BestEffort — which is what a bare
+        /// <c>dds_create_qos()</c> produced before QoS profiles existed, and which a
+        /// BestEffort writer therefore satisfies.
         /// </summary>
         [Fact]
-        public void UndecoratedType_DefaultReader_MatchesBestEffortWriter()
+        public void NoProfile_DefaultReader_MatchesBestEffortWriter()
         {
             string topic = Topic("SystemDefaultRdr");
             using var reader = new DdsReader<TestMessage>(_participant, topic);
@@ -73,7 +73,7 @@ namespace CycloneDDS.Runtime.Tests
 
             Assert.True(
                 QosTestSupport.WaitUntil(() => reader.CurrentStatus.CurrentCount > 0, QosTestSupport.MatchTimeout),
-                "An undecorated reader must default to Cyclone's BestEffort and match a BestEffort writer");
+                "A reader without a profile must default to Cyclone's BestEffort and match a BestEffort writer");
             Assert.Equal(0u, reader.RequestedIncompatibleQosStatus.TotalCount);
         }
 

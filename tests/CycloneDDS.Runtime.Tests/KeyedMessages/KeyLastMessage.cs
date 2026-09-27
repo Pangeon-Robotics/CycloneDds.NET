@@ -2,7 +2,7 @@ using CycloneDDS.Schema;
 
 namespace CycloneDDS.Runtime.Tests.KeyedMessages
 {
-    [DdsTopic("KeyLastMessage")]
+    [DdsStruct]
     public partial struct KeyLastMessage
     {
         [DdsManaged]

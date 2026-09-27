@@ -104,12 +104,6 @@ $ProjectToPack = "$RepoRoot\src\CycloneDDS.Runtime\CycloneDDS.Runtime.csproj"
 dotnet pack $ProjectToPack -c Release -o $NuGetDir --no-build /p:IncludeSymbols=true /p:SymbolPackageFormat=snupkg
 if ($LASTEXITCODE -ne 0) { throw "Pack failed for $ProjectToPack." }
 
-
-# Pack DdsMonitor as another nuget
-$ProjectToPack = "$RepoRoot\tools\DdsMonitor\DdsMonitor.Blazor\DdsMonitor.csproj"
-dotnet pack $ProjectToPack -c Release -o $NuGetDir --no-build /p:IncludeSymbols=true /p:SymbolPackageFormat=snupkg
-if ($LASTEXITCODE -ne 0) { throw "Pack failed for $ProjectToPack." }
-
 # 6. Restore & build examples
 # Now that CycloneDDS.NET is in $NuGetDir (the local-artifacts source), the example
 # projects that reference it as a NuGet package can be restored successfully.

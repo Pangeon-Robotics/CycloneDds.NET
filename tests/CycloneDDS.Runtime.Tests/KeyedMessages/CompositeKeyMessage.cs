@@ -6,7 +6,7 @@ namespace CycloneDDS.Runtime.Tests.KeyedMessages
     /// Composite key (multiple key fields).
     /// Example: Sensor in a specific location - uniquely identified by both SensorId and LocationId.
     /// </summary>
-    [DdsTopic("CompositeKeyTopic")]
+    [DdsStruct]
     public partial struct CompositeKeyMessage
     {
         [DdsKey, DdsId(0)]

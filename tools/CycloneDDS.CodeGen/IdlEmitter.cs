@@ -459,12 +459,6 @@ namespace CycloneDDS.CodeGen
             string indent = GetIndent(indentLevel);
             string fieldIndent = GetIndent(indentLevel + 1);
 
-            if (type.IsTopic)
-            {
-                // ME1-C03 / D06: always emit plain @topic — idlc ignores and warns about name= parameter
-                sb.AppendLine($"{indent}@topic");
-            }
-
             switch (type.Extensibility)
             {
                 case DdsExtensibilityKind.Final:
