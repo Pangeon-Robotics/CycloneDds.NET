@@ -34,7 +34,7 @@ namespace CycloneDDS.Core
             _tail = headSize;
 
             // Zero out the HEAD region to ensure clean state
-            buffer.Slice(0, headSize).Clear();
+            buffer[..headSize].Clear();
         }
 
         /// <summary>
@@ -64,7 +64,7 @@ namespace CycloneDDS.Core
             _buffer[offset + written] = 0; // Null terminator
 
             _tail += size;
-            
+
             IntPtr ptr = _baseAddress + offset;
             return ptr;
         }
@@ -77,7 +77,7 @@ namespace CycloneDDS.Core
                 int padding = alignment - remainder;
                 if (_tail + padding > _buffer.Length)
                 {
-                     throw new IndexOutOfRangeException("Insufficient buffer space for alignment.");
+                    throw new IndexOutOfRangeException("Insufficient buffer space for alignment.");
                 }
                 // Zero out padding? Not strictly necessary as we shouldn't read it, but good practice.
                 _buffer.Slice(_tail, padding).Clear();
@@ -87,12 +87,9 @@ namespace CycloneDDS.Core
 
         /// <summary>
         /// Creates a native DDS sequence from a span of primitives.
-        /// Copying is done efficiently.
         /// </summary>
         public DdsSequenceNative CreateSequence<T>(ReadOnlySpan<T> data) where T : unmanaged
         {
-            AlignCore(8); // Align the sequence data to 8 bytes (max primitive alignment)
-
             if (data.IsEmpty)
             {
                 return new DdsSequenceNative
@@ -103,6 +100,8 @@ namespace CycloneDDS.Core
                 };
             }
 
+            AlignCore(8); // Align the sequence data to 8 bytes (max primitive alignment)
+
             int elementSize = Unsafe.SizeOf<T>();
             int totalSize = data.Length * elementSize;
 
@@ -112,7 +111,7 @@ namespace CycloneDDS.Core
             }
 
             int offset = _tail;
-            
+
             // Copy data
             Span<byte> dest = _buffer.Slice(offset, totalSize);
             MemoryMarshal.Cast<T, byte>(data).CopyTo(dest);
@@ -132,7 +131,7 @@ namespace CycloneDDS.Core
         /// </summary>
         public Span<TNative> AllocateArray<TNative>(int count) where TNative : unmanaged
         {
-            AlignCore(8); 
+            AlignCore(8);
 
             int elementSize = Unsafe.SizeOf<TNative>();
             int totalSize = count * elementSize;
@@ -143,7 +142,7 @@ namespace CycloneDDS.Core
             }
 
             int offset = _tail;
-            
+
             // Zero out memory
             Span<byte> memory = _buffer.Slice(offset, totalSize);
             memory.Clear();

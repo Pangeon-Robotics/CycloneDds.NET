@@ -20,7 +20,7 @@ namespace CycloneDDS.Core
         {
             if (text == null)
                 return 0;
-            
+
             return Encoding.UTF8.GetByteCount(text) + 1;
         }
 

@@ -27,11 +27,10 @@ namespace CycloneDDS.Core
         public IntPtr Buffer;
 
         /// <summary>
-        /// Indicates whether the buffer is owned by the sequence (true) or external (false).
+        /// Indicates whether the buffer is owned by the sequence (true) or external (false). Note that Cyclone's
+        /// actual behavior is more complex, but in general, just leave this false and never call dds_sample_free.
         /// </summary>
         [MarshalAs(UnmanagedType.I1)]
         public bool Release;
-
-
     }
 }
