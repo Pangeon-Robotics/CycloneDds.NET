@@ -1,6 +1,5 @@
 using System;
 using System.Runtime.InteropServices;
-using CycloneDDS.Runtime;
 
 namespace CycloneDDS.Runtime.Interop
 {
@@ -13,11 +12,14 @@ namespace CycloneDDS.Runtime.Interop
         public struct DdsEntity
         {
             public int Handle;
-            public bool IsValid => Handle > 0;
+            public readonly bool IsValid => Handle > 0;
 
-            public static readonly DdsEntity Null = new DdsEntity { Handle = 0 };
+            public static readonly DdsEntity Null = new() { Handle = 0 };
 
-            public override string ToString() => $"DdsEntity(0x{Handle:x})";
+            public override readonly string ToString()
+            {
+                return $"DdsEntity(0x{Handle:x})";
+            }
         }
 
         public enum DdsReturnCode : int
@@ -664,7 +666,7 @@ namespace CycloneDDS.Runtime.Interop
     /// Used for O(1) participant/writer correlation.
     /// </summary>
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    [CycloneDDS.Schema.DdsStruct]
+    [Schema.DdsStruct]
     public partial struct DdsGuid : IEquatable<DdsGuid>
     {
         /// <summary>
@@ -677,14 +679,17 @@ namespace CycloneDDS.Runtime.Interop
         /// </summary>
         public long Low;
 
-        public bool Equals(DdsGuid other) => High == other.High && Low == other.Low;
+        public readonly bool Equals(DdsGuid other)
+        {
+            return High == other.High && Low == other.Low;
+        }
 
         // Helper to convert Native DdsGuid -> System.Guid
-        public unsafe System.Guid ToManaged()
+        public unsafe Guid ToManaged()
         {
             fixed (void* ptr = &this)
             {
-                return new System.Guid(new ReadOnlySpan<byte>(ptr, 16));
+                return new Guid(new ReadOnlySpan<byte>(ptr, 16));
             }
         }
 
@@ -703,9 +708,20 @@ namespace CycloneDDS.Runtime.Interop
         {
             return ddsGuid.ToManaged();
         }
-        public override bool Equals(object? obj) => obj is DdsGuid other && Equals(other);
-        public override int GetHashCode() => HashCode.Combine(High, Low);
-        public override string ToString() => $"{High:X16}{Low:X16}";
+        public override bool Equals(object? obj)
+        {
+            return obj is DdsGuid other && Equals(other);
+        }
+
+        public override readonly int GetHashCode()
+        {
+            return HashCode.Combine(High, Low);
+        }
+
+        public override readonly string ToString()
+        {
+            return $"{High:X16}{Low:X16}";
+        }
 
         public static bool operator ==(DdsGuid left, DdsGuid right) => left.Equals(right);
         public static bool operator !=(DdsGuid left, DdsGuid right) => !left.Equals(right);
