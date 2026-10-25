@@ -1,7 +1,4 @@
-using System;
-using CycloneDDS.Core;
 using CycloneDDS.Runtime.Interop;
-using CycloneDDS.Runtime.Memory;
 using CycloneDDS.Schema;
 
 namespace CycloneDDS.Runtime.Tracking
@@ -14,8 +11,6 @@ namespace CycloneDDS.Runtime.Tracking
     [DdsExtensibility(DdsExtensibilityKind.Appendable)]
     public partial struct SenderIdentity
     {
-        // ... fields ...
-
         /// <summary>
         /// Native DDS Participant GUID (16 bytes) - used as correlation key.
         /// </summary>

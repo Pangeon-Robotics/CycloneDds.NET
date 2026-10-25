@@ -5,43 +5,32 @@ using CycloneDDS.Runtime.Tracking;
 
 namespace CycloneDDS.Runtime
 {
-    public ref struct DdsLoan<T>
+    public ref struct DdsLoan<T>(
+        DdsEntityHandle reader,
+        IntPtr[] samples,
+        DdsApi.DdsSampleInfo[] infos,
+        int length,
+        SenderRegistry? registry = null,
+        Predicate<T>? filter = null)
     {
-        private readonly DdsEntityHandle _reader;
-        private readonly IntPtr[] _samples; // Rented from ArrayPool
-        private readonly DdsApi.DdsSampleInfo[] _infos; // Rented from ArrayPool
-        private readonly int _length;
-        private readonly SenderRegistry? _registry;
-        internal readonly Predicate<T>? _filter;
-        private bool _disposed;
+        private readonly DdsEntityHandle _reader = reader;
+        private readonly IntPtr[] _samples = samples; // Rented from ArrayPool
+        private readonly DdsApi.DdsSampleInfo[] _infos = infos; // Rented from ArrayPool
+        private readonly int _length = length;
+        private readonly SenderRegistry? _registry = registry;
+        internal readonly Predicate<T>? _filter = filter;
+        private bool _disposed = false;
 
-        public DdsLoan(
-            DdsEntityHandle reader, 
-            IntPtr[] samples, 
-            DdsApi.DdsSampleInfo[] infos, 
-            int length,
-            SenderRegistry? registry = null,
-            Predicate<T>? filter = null)
-        {
-            _reader = reader;
-            _samples = samples;
-            _infos = infos;
-            _length = length;
-            _registry = registry;
-            _filter = filter;
-            _disposed = false;
-        }
+        public readonly int Length => _length;
+        public readonly int Count => _length;
 
-        public int Length => _length;
-        public int Count => _length;
-        
-        public ReadOnlySpan<DdsApi.DdsSampleInfo> Infos => new ReadOnlySpan<DdsApi.DdsSampleInfo>(_infos, 0, _length);
+        public readonly ReadOnlySpan<DdsApi.DdsSampleInfo> Infos => new(_infos, 0, _length);
 
         public SenderIdentity? GetSender(int index)
         {
             if (_registry == null) return null;
             if ((uint)index >= (uint)_length) throw new IndexOutOfRangeException();
-            
+
             long handle = _infos[index].PublicationHandle;
             if (_registry.TryGetIdentity(handle, out var identity))
             {
@@ -68,15 +57,15 @@ namespace CycloneDDS.Runtime
             {
                 // Return loan to DDS
                 // We pass the array of pointers (samples) that was filled by dds_take
-                DdsApi.dds_return_loan(_reader.NativeHandle.Handle, _samples, _length);
+                _ = DdsApi.dds_return_loan(_reader.NativeHandle.Handle, _samples, _length);
             }
-            
+
             // Return arrays to pool
             if (_samples != null) ArrayPool<IntPtr>.Shared.Return(_samples);
             if (_infos != null) ArrayPool<DdsApi.DdsSampleInfo>.Shared.Return(_infos);
         }
 
-        public Enumerator GetEnumerator() => new Enumerator(this);
+        public readonly Enumerator GetEnumerator() => new(this);
 
         public ref struct Enumerator
         {
@@ -94,7 +83,7 @@ namespace CycloneDDS.Runtime
                 while (++_index < _loan._length)
                 {
                     if (_loan._filter == null) return true;
-                    
+
                     if (_loan._infos[_index].ValidData == 0) return true;
 
                     var sample = new DdsSample<T>(_loan._samples[_index], in _loan._infos[_index]);
@@ -103,7 +92,7 @@ namespace CycloneDDS.Runtime
                 return false;
             }
 
-            public DdsSample<T> Current => new DdsSample<T>(_loan._samples[_index], in _loan._infos[_index]);
+            public readonly DdsSample<T> Current => new(_loan._samples[_index], in _loan._infos[_index]);
         }
     }
 }

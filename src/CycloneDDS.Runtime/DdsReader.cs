@@ -8,9 +8,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using CycloneDDS.Core;
 using CycloneDDS.Runtime.Interop;
-using CycloneDDS.Runtime.Memory;
 using CycloneDDS.Runtime.Tracking;
-using CycloneDDS.Schema;
 
 namespace CycloneDDS.Runtime
 {
@@ -57,7 +55,7 @@ namespace CycloneDDS.Runtime
             get
             {
                 if (_readerHandle == null) throw new ObjectDisposedException(nameof(DdsReader<T>));
-                DdsApi.dds_get_subscription_matched_status(_readerHandle.NativeHandle.Handle, out var status);
+                _ = DdsApi.dds_get_subscription_matched_status(_readerHandle.NativeHandle.Handle, out var status);
                 return status;
             }
         }
@@ -76,7 +74,7 @@ namespace CycloneDDS.Runtime
             get
             {
                 if (_readerHandle == null) throw new ObjectDisposedException(nameof(DdsReader<T>));
-                DdsApi.dds_get_requested_incompatible_qos_status(_readerHandle.NativeHandle.Handle, out var status);
+                _ = DdsApi.dds_get_requested_incompatible_qos_status(_readerHandle.NativeHandle.Handle, out var status);
                 return status;
             }
         }
@@ -94,7 +92,7 @@ namespace CycloneDDS.Runtime
             get
             {
                 if (_readerHandle == null) throw new ObjectDisposedException(nameof(DdsReader<T>));
-                DdsApi.dds_get_requested_deadline_missed_status(_readerHandle.NativeHandle.Handle, out var status);
+                _ = DdsApi.dds_get_requested_deadline_missed_status(_readerHandle.NativeHandle.Handle, out var status);
                 return status;
             }
         }
@@ -112,7 +110,7 @@ namespace CycloneDDS.Runtime
             get
             {
                 if (_readerHandle == null) throw new ObjectDisposedException(nameof(DdsReader<T>));
-                DdsApi.dds_get_liveliness_changed_status(_readerHandle.NativeHandle.Handle, out var status);
+                _ = DdsApi.dds_get_liveliness_changed_status(_readerHandle.NativeHandle.Handle, out var status);
                 return status;
             }
         }
@@ -314,7 +312,7 @@ namespace CycloneDDS.Runtime
 
                 if (_readerHandle != null)
                 {
-                    DdsApi.dds_reader_set_listener(_readerHandle.NativeHandle, _listener);
+                    _ = DdsApi.dds_reader_set_listener(_readerHandle.NativeHandle, _listener);
                 }
             }
         }
@@ -341,7 +339,7 @@ namespace CycloneDDS.Runtime
                 var handle = GCHandle.FromIntPtr(arg);
                 if (handle.IsAllocated && handle.Target is DdsReader<T> self)
                 {
-                    self._waitTaskSource?.TrySetResult(true);
+                    _ = (self._waitTaskSource?.TrySetResult(true));
                 }
             }
             catch { }
@@ -374,7 +372,7 @@ namespace CycloneDDS.Runtime
                     continue;
                 }
 
-                await WaitDataAsync(cancellationToken);
+                _ = await WaitDataAsync(cancellationToken);
 
                 batch = TakeBatch();
                 foreach (var item in batch) yield return item;

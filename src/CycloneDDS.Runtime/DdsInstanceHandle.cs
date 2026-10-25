@@ -5,16 +5,14 @@ namespace CycloneDDS.Runtime
     /// <summary>
     /// Represents a handle to a specific instance of a keyed topic.
     /// </summary>
-    public readonly struct DdsInstanceHandle : IEquatable<DdsInstanceHandle>
+    public readonly struct DdsInstanceHandle(long value) : IEquatable<DdsInstanceHandle>
     {
-        public readonly long Value;
+        public readonly long Value = value;
 
-        public static readonly DdsInstanceHandle Nil = new DdsInstanceHandle(0);
-
-        public DdsInstanceHandle(long value) { Value = value; }
+        public static readonly DdsInstanceHandle Nil = new(0);
 
         public bool IsNil => Value == 0;
-        
+
         public bool Equals(DdsInstanceHandle other) => Value == other.Value;
         public override bool Equals(object? obj) => obj is DdsInstanceHandle other && Equals(other);
         public override int GetHashCode() => Value.GetHashCode();
@@ -24,6 +22,6 @@ namespace CycloneDDS.Runtime
         public static bool operator !=(DdsInstanceHandle left, DdsInstanceHandle right) => !left.Equals(right);
 
         public static implicit operator long(DdsInstanceHandle handle) => handle.Value;
-        public static implicit operator DdsInstanceHandle(long value) => new DdsInstanceHandle(value);
+        public static implicit operator DdsInstanceHandle(long value) => new(value);
     }
 }

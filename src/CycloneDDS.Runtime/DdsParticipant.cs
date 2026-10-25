@@ -90,7 +90,7 @@ namespace CycloneDDS.Runtime
                     // Anything left here is still held by an endpoint the caller never disposed
                     foreach (var entry in _topics.Values)
                     {
-                        DdsApi.dds_delete(entry.Entity);
+                        _ = DdsApi.dds_delete(entry.Entity);
                         entry.Resource.Dispose();
                     }
                     _topics.Clear();
@@ -165,22 +165,16 @@ namespace CycloneDDS.Runtime
 
                 if (--entry.RefCount > 0) return;
 
-                _topics.Remove(key);
-                DdsApi.dds_delete(entry.Entity);
+                _ = _topics.Remove(key);
+                _ = DdsApi.dds_delete(entry.Entity);
                 entry.Resource.Dispose();
             }
         }
 
-        private sealed class TopicEntry
+        private sealed class TopicEntry(DdsApi.DdsEntity entity, TopicResource resource)
         {
-            public TopicEntry(DdsApi.DdsEntity entity, TopicResource resource)
-            {
-                Entity = entity;
-                Resource = resource;
-            }
-
-            public DdsApi.DdsEntity Entity { get; }
-            public TopicResource Resource { get; }
+            public DdsApi.DdsEntity Entity { get; } = entity;
+            public TopicResource Resource { get; } = resource;
             public int RefCount { get; set; } = 1;
         }
 
@@ -516,7 +510,7 @@ namespace CycloneDDS.Runtime
             var process = System.Diagnostics.Process.GetCurrentProcess();
 
             // Get native participant GUID
-            DdsApi.dds_get_guid(NativeEntity.Handle, out var myGuid);
+            _ = DdsApi.dds_get_guid(NativeEntity.Handle, out var myGuid);
 
             var identity = new SenderIdentity
             {

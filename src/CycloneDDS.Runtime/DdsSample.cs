@@ -1,19 +1,12 @@
 using System;
-using CycloneDDS.Runtime;
 using CycloneDDS.Runtime.Interop;
 
 namespace CycloneDDS.Runtime
 {
-    public readonly ref struct DdsSample<T>
+    public readonly ref struct DdsSample<T>(IntPtr nativePtr, ref readonly DdsApi.DdsSampleInfo info)
     {
-        public readonly IntPtr NativePtr;
-        public readonly DdsApi.DdsSampleInfo Info;
-
-        public DdsSample(IntPtr nativePtr, ref readonly DdsApi.DdsSampleInfo info)
-        {
-            NativePtr = nativePtr;
-            Info = info;
-        }
+        public readonly IntPtr NativePtr = nativePtr;
+        public readonly DdsApi.DdsSampleInfo Info = info;
 
         public bool IsValid => Info.ValidData != 0;
 
