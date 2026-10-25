@@ -1,11 +1,8 @@
-using System;
-
 namespace CycloneDDS.Schema
 {
     /// <summary>
     /// Marks a struct or class as a DDS data type and triggers code generation for its
-    /// serialization. A marked type can be nested in another or published on a topic; the
-    /// topic name and QoS are chosen where the reader or writer is created, not on the type.
+    /// serialization.
     /// </summary>
     /// <example>
     /// <code>
