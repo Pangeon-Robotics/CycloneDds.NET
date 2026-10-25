@@ -30,4 +30,7 @@ public enum DdsQosPolicy
     TransportPriority = 20,
     Lifespan = 21,
     DurabilityService = 22,
+    Property = 23,
+    TypeConsistencyEnforcement = 24,
+    DataRepresentation = 25
 }
