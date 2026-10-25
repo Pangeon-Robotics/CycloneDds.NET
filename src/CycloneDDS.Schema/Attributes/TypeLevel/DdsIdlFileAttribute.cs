@@ -19,7 +19,7 @@ namespace CycloneDDS.Schema
             if (string.IsNullOrWhiteSpace(fileName))
                 throw new ArgumentException("File name cannot be empty", nameof(fileName));
 
-            if (fileName.Contains(".") || fileName.Contains("/") || fileName.Contains("\\"))
+            if (fileName.Contains(".") || fileName.Contains('/') || fileName.Contains('\\'))
                 throw new ArgumentException("File name must not contain extension or path separators", nameof(fileName));
 
             FileName = fileName;
