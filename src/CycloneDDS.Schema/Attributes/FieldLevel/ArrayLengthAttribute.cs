@@ -1,17 +1,20 @@
 namespace CycloneDDS.Schema;
 
 /// <summary>
-/// Specifies the fixed length of an array.
+/// Makes a <c>T[]</c> member a fixed-length array (<c>T[N]</c>) instead of a sequence.
+/// The array must hold exactly <see cref="Length"/> elements when written; null writes defaults.
 /// </summary>
-/// <remarks>
-/// Initializes a new instance of the <see cref="ArrayLengthAttribute"/> class.
-/// </remarks>
-/// <param name="length">The fixed length of the array.</param>
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false)]
-public sealed class ArrayLengthAttribute(int length) : Attribute
+public sealed class ArrayLengthAttribute : Attribute
 {
-    /// <summary>
-    /// Gets the fixed length of the array.
-    /// </summary>
-    public int Length { get; } = length;
+    /// <summary>Number of elements.</summary>
+    public int Length { get; }
+
+    /// <param name="length">Number of elements. Must be greater than 0.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="length"/> is not positive.</exception>
+    public ArrayLengthAttribute(int length)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(length);
+        Length = length;
+    }
 }

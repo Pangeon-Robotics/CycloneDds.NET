@@ -29,8 +29,10 @@ namespace CycloneDDS.Runtime.Tracking
 
         internal SenderRegistry(DdsParticipant participant)
         {
-            // Subscribe to identity announcements
-            _identityReader = new DdsReader<SenderIdentity>(participant, "__FcdcSenderIdentity", DdsQos.Latched);
+            // Subscribe to identity announcements. The topic is keyless, so KeepAll keeps identities
+            // from several participants that arrive between two takes.
+            _identityReader = new DdsReader<SenderIdentity>(participant, "__FcdcSenderIdentity",
+                DdsQos.Latched with { HistoryKind = DdsHistoryKind.KeepAll });
 
             // Start async monitoring
             _monitorTask = MonitorIdentitiesAsync();

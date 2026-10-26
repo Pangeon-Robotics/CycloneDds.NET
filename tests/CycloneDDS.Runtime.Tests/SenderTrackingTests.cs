@@ -9,8 +9,6 @@ using CycloneDDS.Runtime.Tracking;
 using CycloneDDS.Runtime.Interop;
 using CycloneDDS.Schema;
 
-using CycloneDDS.Runtime.Memory; // Add using
-
 using DdsGuid = CycloneDDS.Runtime.Interop.DdsGuid;
 
 namespace CycloneDDS.Runtime.Tests
@@ -19,9 +17,7 @@ namespace CycloneDDS.Runtime.Tests
     [DdsStruct]
     public partial struct SenderTrackingTestMsg
     {
-        [DdsId(0), DdsKey]
         public int Id;
-        [DdsId(1)]
         public int Value;
     }
 
@@ -173,7 +169,8 @@ namespace CycloneDDS.Runtime.Tests
              
              using var pReceiver = new DdsParticipant();
              pReceiver.EnableSenderTracking(new SenderIdentityConfig { AppInstanceId = 99 });
-             using var reader = new DdsReader<SenderTrackingTestMsg>(pReceiver, TEST_TOPIC);
+             // Keyless topic: keep both writers' samples rather than only the latest
+             using var reader = new DdsReader<SenderTrackingTestMsg>(pReceiver, TEST_TOPIC, DdsQos.KeepAll);
              reader.EnableSenderTracking(pReceiver.SenderRegistry!);
              
              Thread.Sleep(2000); // Discovery can take time

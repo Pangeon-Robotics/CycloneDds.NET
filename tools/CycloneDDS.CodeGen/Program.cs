@@ -1,41 +1,36 @@
-using System;
-using System.IO;
-using System.Linq;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-
 namespace CycloneDDS.CodeGen
 {
-    public class Program
+    public static class Program
     {
+        /// <summary>
+        /// Usage: <c>CycloneDDS.CodeGen &lt;source-directory&gt; &lt;output-directory&gt; [references]</c>,
+        /// where references are assembly paths separated by ';' (MSBuild's flattened @(ReferencePath)).
+        /// </summary>
         public static int Main(string[] args)
         {
-            //DumpCppAst.Dump();
             if (args.Length < 2)
             {
-                Console.Error.WriteLine("Usage: CycloneDDS.CodeGen <source-directory> <output-directory>");
+                Console.Error.WriteLine("Usage: CycloneDDS.CodeGen <source-directory> <output-directory> [references]");
                 return 1;
             }
-            
-            string sourceDir = args[0];
-            string outputDir = args[1];
-            
-            string[]? references = null;
-            if (args.Length > 2)
-            {
-                var allRefs = string.Join(";", args.Skip(2));
-                references = allRefs.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-            }
-            
+
+            var references = string.Join(";", args.Skip(2)).Split(';', StringSplitOptions.RemoveEmptyEntries);
+
             try
             {
-                var generator = new CodeGenerator();
-                generator.Generate(sourceDir, outputDir, references);
+                new CodeGenerator().Generate(args[0], args[1], references);
                 return 0;
+            }
+            catch (CodeGenerator.SchemaException ex)
+            {
+                // One line per diagnostic, in the canonical format MSBuild turns into build errors
+                foreach (var diagnostic in ex.Diagnostics)
+                    Console.Error.WriteLine(diagnostic);
+                return 1;
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Error: {ex.Message}");
+                Console.Error.WriteLine($"CycloneDDS.CodeGen: error CDDS0000: {ex.Message}");
                 return 1;
             }
         }

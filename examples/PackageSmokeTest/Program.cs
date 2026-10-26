@@ -13,9 +13,9 @@ namespace PackageSmokeTest
     [DdsStruct]
     public partial struct SmokeSample
     {
-        [DdsKey] public int Id;
+        public int Id;
         public double Value;
-        public FixedString32 Label;
+        [DdsBound(32)] public string Label;
     }
 
     public static class Program
@@ -44,7 +44,7 @@ namespace PackageSmokeTest
                 {
                     Id = 42,
                     Value = 3.14159,
-                    Label = new FixedString32("hello-cyclonedds")
+                    Label = "hello-cyclonedds"
                 };
                 writer.Write(sent);
 
@@ -70,7 +70,7 @@ namespace PackageSmokeTest
                 var got = received.Value;
                 bool ok = got.Id == sent.Id
                           && Math.Abs(got.Value - sent.Value) < 1e-9
-                          && got.Label.ToString() == sent.Label.ToString();
+                          && got.Label == sent.Label;
 
                 if (!ok)
                 {

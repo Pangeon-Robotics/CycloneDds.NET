@@ -2,8 +2,9 @@ namespace CycloneDDS.Schema
 {
     /// <summary>
     /// Specifies the IDL module hierarchy for this type.
-    /// Use "::" as separator (e.g., "LegacySys::Core").
+    /// Use "::" as separator (e.g., "std_msgs::msg::dds_").
     /// If omitted, defaults to C# namespace converted to modules.
+    /// The module and type name together form the DDS type name used for matching on the wire.
     /// </summary>
     [AttributeUsage(AttributeTargets.Struct | AttributeTargets.Class, AllowMultiple = false)]
     public sealed class DdsIdlModuleAttribute : Attribute

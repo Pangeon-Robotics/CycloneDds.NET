@@ -343,75 +343,36 @@ namespace CycloneDDS.Runtime.Tests
         }
 
         [Fact]
-        public void DisposeInstance_RemovesInstance()
+        public void WriterDeleted_ReaderGetsStateChangeWithoutData()
         {
             using var participant = new DdsParticipant(0);
-            
-            using var writer = new DdsWriter<KeyedTestMessage>(
-                participant, "DisposeTopic");
-            using var reader = new DdsReader<KeyedTestMessage>(
-                participant, "DisposeTopic");
-            
-            var msg = new KeyedTestMessage { Id = 100, Value = 100 };
-            
-            writer.Write(msg);
+            using var reader = new DdsReader<TestMessage>(participant, "WriterGoneTopic");
+
+            var writer = new DdsWriter<TestMessage>(participant, "WriterGoneTopic");
+            writer.Write(new TestMessage { Id = 1, Value = 1 });
             Thread.Sleep(500);
 
-            // Now Dispose
-            writer.DisposeInstance(msg);
-            Thread.Sleep(1000);
-
-            using var scope = reader.Take();
-            bool foundDispose = false;
-            //Console.WriteLine($"[DisposeInstance] Scope Count: {scope.Count}");
-            for(int i=0; i<scope.Count; i++)
-            {
-                var info = scope.Infos[i];
-                //Console.WriteLine($"[DisposeInstance] Sample {i}: Valid={info.ValidData}, InstanceState={info.InstanceState}");
-                // Relaxed check: Accept Disposed state regardless of ValidData flag (which might be set if key is transmitted as data)
-                if (scope.Infos[i].InstanceState == DdsInstanceState.NotAliveDisposed)
-                {
-                    foundDispose = true;
-                    Assert.NotEqual(0, scope.Infos[i].InstanceHandle);
-                }
-            }
-            Assert.True(foundDispose, "Should receive Disposed instance state");
-        }
-
-        [Fact]
-        public void UnregisterInstance_RemovesWriterOwnership()
-        {
-            using var participant = new DdsParticipant(0);
-            
-            using var writer = new DdsWriter<KeyedTestMessage>(
-                participant, "UnregisterTopic");
-            using var reader = new DdsReader<KeyedTestMessage>(
-                participant, "UnregisterTopic");
-            
-            var msg = new KeyedTestMessage { Id = 200, Value = 200 };
-            
-            writer.Write(msg);
+            // Consume the data first: a state change on an unread sample is folded into it
+            using (var data = reader.Take()) Assert.Equal(1, data.Count);
+            writer.Dispose();
             Thread.Sleep(500);
 
-            // Now Unregister
-            writer.UnregisterInstance(msg);
-            Thread.Sleep(1000);
-
             using var scope = reader.Take();
-            bool foundUnregister = false;
-            //Console.WriteLine($"[UnregisterInstance] Scope Count: {scope.Count}");
-            for(int i=0; i<scope.Count; i++)
+            bool foundStateChange = false;
+            foreach (var sample in scope)
             {
-                var info = scope.Infos[i];
-                //Console.WriteLine($"[UnregisterInstance] Sample {i}: Valid={info.ValidData}, InstanceState={info.InstanceState}");
-                // Relaxed: Unregister might trigger Dispose if autodispose QoS is set
-                if (scope.Infos[i].InstanceState == DdsInstanceState.NotAliveNoWriters ||
-                    scope.Infos[i].InstanceState == DdsInstanceState.NotAliveDisposed)
+                if (sample.IsValid) continue;
+
+                foundStateChange = true;
+                Assert.NotEqual(DdsInstanceState.Alive, sample.Info.InstanceState);
+                try
                 {
-                    foundUnregister = true;
+                    _ = sample.Data;
+                    Assert.Fail("Data of a sample without data must throw");
                 }
+                catch (InvalidOperationException) { }
             }
-            Assert.True(foundUnregister, "Should receive NoWriters instance state");
+            Assert.True(foundStateChange, "Deleting the only writer should produce a sample without data");
         }
     }
 }

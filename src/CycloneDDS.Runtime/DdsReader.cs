@@ -1,6 +1,5 @@
 using System;
 using System.Buffers;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,7 +12,7 @@ using CycloneDDS.Runtime.Tracking;
 namespace CycloneDDS.Runtime
 {
     public sealed class DdsReader<T> : IDdsReader, IInternalDdsEntity, IDisposable
-        where T : new()
+        where T : IDdsType<T>
     {
         private SenderRegistry? _registry;
         private DdsEntityHandle? _readerHandle;
@@ -122,29 +121,6 @@ namespace CycloneDDS.Runtime
         DdsApi.DdsEntity IInternalDdsEntity.NativeEntity =>
             _readerHandle?.NativeHandle ?? throw new ObjectDisposedException(nameof(DdsReader<T>));
 
-        private delegate int GetNativeSizeDelegate(in T sample);
-        private delegate void MarshalToNativeDelegate(in T sample, IntPtr target, ref NativeArena arena);
-
-        private static readonly GetNativeSizeDelegate? _nativeSizer;
-        private static readonly MarshalToNativeDelegate? _nativeMarshaller;
-        private static readonly int _nativeHeadSize;
-
-        static DdsReader()
-        {
-            try
-            {
-                var nativeSizeMethod = typeof(T).GetMethod("GetNativeSize", new[] { typeof(T).MakeByRefType() });
-                if (nativeSizeMethod != null) _nativeSizer = (GetNativeSizeDelegate)nativeSizeMethod.CreateDelegate(typeof(GetNativeSizeDelegate));
-
-                var toNativeMethod = typeof(T).GetMethod("MarshalToNative", new[] { typeof(T).MakeByRefType(), typeof(IntPtr), typeof(NativeArena).MakeByRefType() });
-                if (toNativeMethod != null) _nativeMarshaller = (MarshalToNativeDelegate)toNativeMethod.CreateDelegate(typeof(MarshalToNativeDelegate));
-
-                var headSizeMethod = typeof(T).GetMethod("GetNativeHeadSize", BindingFlags.Public | BindingFlags.Static);
-                if (headSizeMethod != null) _nativeHeadSize = (int)(headSizeMethod.Invoke(null, null) ?? 0);
-            }
-            catch (Exception ex) { Console.WriteLine($"[DdsReader] Initialization failed: {ex}"); throw; }
-        }
-
         /// <summary>
         /// Creates a reader for <typeparamref name="T"/> on <paramref name="participant"/>.
         /// </summary>
@@ -232,30 +208,27 @@ namespace CycloneDDS.Runtime
         {
             if (_readerHandle == null) throw new ObjectDisposedException(nameof(DdsReader<T>));
 
-            var samples = ArrayPool<IntPtr>.Shared.Rent(maxSamples);
+            var serdata = ArrayPool<IntPtr>.Shared.Rent(maxSamples);
             var infos = ArrayPool<DdsApi.DdsSampleInfo>.Shared.Rent(maxSamples);
 
-            Array.Clear(samples, 0, maxSamples);
-
-            int count;
-            if (isTake)
-                count = DdsApi.dds_take_mask(_readerHandle.NativeHandle.Handle, samples, infos, (UIntPtr)maxSamples, (uint)maxSamples, mask);
-            else
-                count = DdsApi.dds_read_mask(_readerHandle.NativeHandle.Handle, samples, infos, (UIntPtr)maxSamples, (uint)maxSamples, mask);
+            // Each returned element is a serdata reference the loan releases
+            int count = isTake
+                ? DdsApi.dds_takecdr(_readerHandle.NativeHandle, serdata, (uint)maxSamples, infos, mask)
+                : DdsApi.dds_readcdr(_readerHandle.NativeHandle, serdata, (uint)maxSamples, infos, mask);
 
             if (count < 0)
             {
-                ArrayPool<IntPtr>.Shared.Return(samples);
+                ArrayPool<IntPtr>.Shared.Return(serdata);
                 ArrayPool<DdsApi.DdsSampleInfo>.Shared.Return(infos);
 
                 if (count == (int)DdsApi.DdsReturnCode.NoData)
                 {
-                    return new DdsLoan<T>(_readerHandle, null!, null!, 0, _registry, _filter);
+                    return new DdsLoan<T>(null!, null!, 0, _registry, _filter);
                 }
-                throw new DdsException((DdsApi.DdsReturnCode)count, $"dds_{(isTake ? "take" : "read")} failed: {count}");
+                throw new DdsException((DdsApi.DdsReturnCode)count, $"dds_{(isTake ? "take" : "read")}cdr failed: {count}");
             }
 
-            return new DdsLoan<T>(_readerHandle, samples, infos, count, _registry, _filter);
+            return new DdsLoan<T>(serdata, infos, count, _registry, _filter);
         }
 
         private bool HasData()
@@ -395,74 +368,6 @@ namespace CycloneDDS.Runtime
             _participant?.ReleaseTopic<T>(_topicName);
             _topicHandle = DdsApi.DdsEntity.Null;
             _participant = null;
-        }
-
-        public DdsInstanceHandle LookupInstance(in T keySample)
-        {
-            if (_readerHandle == null) throw new ObjectDisposedException(nameof(DdsReader<T>));
-
-            if (_nativeMarshaller != null && _nativeSizer != null)
-            {
-                int size = _nativeSizer(in keySample);
-                byte[] buffer = ArrayPool<byte>.Shared.Rent(size);
-                try
-                {
-                    unsafe
-                    {
-                        fixed (byte* ptr = buffer)
-                        {
-                            NativeArena arena = new NativeArena(new Span<byte>(buffer, 0, size), (IntPtr)ptr, _nativeHeadSize);
-                            _nativeMarshaller(in keySample, (IntPtr)ptr, ref arena);
-                            long handle = DdsApi.dds_lookup_instance(_readerHandle.NativeHandle.Handle, (IntPtr)ptr);
-                            return new DdsInstanceHandle(handle);
-                        }
-                    }
-                }
-                finally
-                {
-                    ArrayPool<byte>.Shared.Return(buffer);
-                }
-            }
-
-            throw new NotSupportedException("Native marshaling delegates missing for this type.");
-        }
-
-        public DdsLoan<T> TakeInstance(DdsInstanceHandle handle, int maxSamples = 1)
-        {
-            if (_readerHandle == null) throw new ObjectDisposedException(nameof(DdsReader<T>));
-            var samples = ArrayPool<IntPtr>.Shared.Rent(maxSamples);
-            var infos = ArrayPool<DdsApi.DdsSampleInfo>.Shared.Rent(maxSamples);
-            Array.Clear(samples, 0, maxSamples);
-
-            int count = DdsApi.dds_take_instance(_readerHandle.NativeHandle.Handle, samples, infos, (UIntPtr)maxSamples, (uint)maxSamples, handle.Value);
-
-            if (count < 0)
-            {
-                ArrayPool<IntPtr>.Shared.Return(samples);
-                ArrayPool<DdsApi.DdsSampleInfo>.Shared.Return(infos);
-                if (count == (int)DdsApi.DdsReturnCode.NoData) return new DdsLoan<T>(_readerHandle, null!, null!, 0, _registry, _filter);
-                throw new DdsException((DdsApi.DdsReturnCode)count, $"dds_take_instance failed: {count}");
-            }
-            return new DdsLoan<T>(_readerHandle, samples, infos, count, _registry, _filter);
-        }
-
-        public DdsLoan<T> ReadInstance(DdsInstanceHandle handle, int maxSamples = 1)
-        {
-            if (_readerHandle == null) throw new ObjectDisposedException(nameof(DdsReader<T>));
-            var samples = ArrayPool<IntPtr>.Shared.Rent(maxSamples);
-            var infos = ArrayPool<DdsApi.DdsSampleInfo>.Shared.Rent(maxSamples);
-            Array.Clear(samples, 0, maxSamples);
-
-            int count = DdsApi.dds_read_instance(_readerHandle.NativeHandle.Handle, samples, infos, (UIntPtr)maxSamples, (uint)maxSamples, handle.Value);
-
-            if (count < 0)
-            {
-                ArrayPool<IntPtr>.Shared.Return(samples);
-                ArrayPool<DdsApi.DdsSampleInfo>.Shared.Return(infos);
-                if (count == (int)DdsApi.DdsReturnCode.NoData) return new DdsLoan<T>(_readerHandle, null!, null!, 0, _registry, _filter);
-                throw new DdsException((DdsApi.DdsReturnCode)count, $"dds_read_instance failed: {count}");
-            }
-            return new DdsLoan<T>(_readerHandle, samples, infos, count, _registry, _filter);
         }
 
         public void EnableSenderTracking(SenderRegistry registry)
