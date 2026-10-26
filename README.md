@@ -4,21 +4,22 @@
 [![NuGet](https://img.shields.io/nuget/v/CycloneDDS.NET.svg)](https://www.nuget.org/packages/CycloneDDS.NET/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A modern, high-performance, zero-allocation .NET binding for Eclipse Cyclone DDS, with idiomatic C# API.
+A .NET binding for Eclipse Cyclone DDS with an idiomatic C# API, built for wire compatibility with ROS 2 (`rmw_cyclonedds_cpp`).
 
 See [detailed technical overview](DetailedOverview.md).
 
 ## Installation
- 
+
 ### Using the NuGet Package (Recommended)
 
 Install the CycloneDDS.NET package from NuGet:
- 
+
 ```bash
 dotnet add package CycloneDDS.NET
 ```
- 
+
 This single package includes:
+
 - **Runtime Library:** High-performance managed bindings (targets `net8.0`; runs on .NET 8 and later).
 - **Native Assets:** Pre-compiled native runtime and IDL compiler for both **Windows x64** (`ddsc.dll`, `idlc.exe`) and **Linux x64** (`libddsc.so`, `idlc`). NuGet selects the correct runtime asset per platform automatically.
 - **Build Tools:** Automatic C# code generation during build.
@@ -45,304 +46,228 @@ This single package includes:
 
 If you want to build the project from source or contribute:
 
-1.  **Clone the repository** (recursively, to get the native submodule):
+1. **Clone the repository** (recursively, to get the native submodule):
+
     ```bash
     git clone --recursive https://github.com/pjanec/CycloneDds.NET.git
     cd CycloneDds.NET
     ```
 
-2.  **Build the native libraries** for your platform:
-    -   **Windows** (PowerShell): `.\build\native-win.ps1`
-    -   **Linux** (bash): `build/native-linux.sh Release`
+2. **Build the native libraries** for your platform:
+    - **Windows** (PowerShell): `.\build\native-win.ps1`
+    - **Linux** (bash): `build/native-linux.sh Release`
 
     Then build and test the managed solution:
+
     ```bash
     dotnet build CycloneDDS.NET.Core.slnf -c Release
     dotnet test  CycloneDDS.NET.Core.slnf -c Release
     ```
+
     On Windows you can instead run the one-stop script `.\build\build-and-test.ps1`, which builds the native artifacts (if missing), builds the solution, and runs the tests.
 
-3.  **Requirements:**
-    -   **.NET SDK:** the solution targets `net8.0`, but building requires the **.NET 10 SDK** (the code uses C# 13 language features). Produced binaries still run on .NET 8+.
-    -   **CMake 3.16+** on your `PATH`.
-    -   **Windows:** Visual Studio 2022 with the *C++ Desktop Development* workload (for native compilation), plus the OpenSSL 3.x development files — `winget install ShiningLight.OpenSSL.Prod`. `build\native-win.ps1` looks in `C:\Program Files\OpenSSL`, `C:\Program Files\OpenSSL-Win64` and `C:\OpenSSL-Win64`; set `OPENSSL_ROOT_DIR` to override.
-    -   **Linux:** a C toolchain, `patchelf` and the OpenSSL headers — e.g. `sudo apt-get install -y cmake build-essential patchelf libssl-dev`.
+3. **Requirements:**
+    - **.NET SDK:** the solution targets `net8.0`, but building requires the **.NET 10 SDK** (the code uses C# 13 language features). Produced binaries still run on .NET 8+.
+    - **CMake 3.16+** on your `PATH`.
+    - **Windows:** Visual Studio 2022 with the *C++ Desktop Development* workload (for native compilation), plus the OpenSSL 3.x development files — `winget install ShiningLight.OpenSSL.Prod`. `build\native-win.ps1` looks in `C:\Program Files\OpenSSL`, `C:\Program Files\OpenSSL-Win64` and `C:\OpenSSL-Win64`; set `OPENSSL_ROOT_DIR` to override.
+    - **Linux:** a C toolchain, `patchelf` and the OpenSSL headers — e.g. `sudo apt-get install -y cmake build-essential patchelf libssl-dev`.
 
 ## Key Features
 
-### 🚀 Performance Core
-- **Zero-Allocation Writes:** Custom marshaller writes directly to pooled buffers (ArrayPool) using a C-compatible memory layout.
-- **Zero-Copy Reads:** Read directly from native DDS buffers using `ref struct` views, bypassing deserialization.
-- **Unified API:** Single reader provides both safe managed objects and high-performance zero-copy views.
-- **Lazy Deserialization:** Only pay the cost of deep-copying objects when you explicitly access `.Data`.
+### Schema & Interoperability
 
-### 🧬 Schema & Interoperability
-- **Code-First DSL:** Define your data types entirely in C# using attributes (`[DdsTopic]`, `[DdsKey]`, `[DdsStruct]`, `[DdsQos]`). No need to write IDL files manually.
-- **Automatic IDL Generation:** The build tools automatically generate standard OMG IDL files from your C# classes, ensuring perfect interoperability with other DDS implementations (C++, Python, Java) and tools. See [IDL Generation](IDL-GENERATION.md).
-- **Modern Language Integration:** Full support for C# 12 `[InlineArray]` (safe fixed-size arrays without `unsafe`), typed enums (`enum E : byte` emits `@bit_bound(8)`), and default topic naming based on namespaces.
-- **Auto-Magic Type Discovery:** Runtime automatically registers type descriptors based on your schema.
-- **IDL Import:** Convert existing IDL files into C# DSL automatically using the `IdlImporter` tool.
-- **100% Native Compliance:** Uses Cyclone DDS native serializer for wire compatibility.
+- **Code-first types:** declare `[DdsStruct]` partial structs or classes in C#. The build generates their IDL, an XCDR1 serializer, and the Cyclone topic descriptor.
+- **ROS 2 compatible:** types are IDL `@final` and travel as XCDR1, the representation `rmw_cyclonedds_cpp` uses. Strings, bounded and unbounded sequences, fixed arrays, nested messages and enums all interoperate (see below).
+- **Validated writes:** Cyclone checks every serialized sample against the idlc-generated descriptor before sending it, so a sample that does not match the IDL is rejected instead of reaching the wire.
+- **IDL output:** the generated `.idl` files are standard OMG IDL, usable by other DDS implementations and tools, and are shared between assemblies automatically.
 
+### Developer Experience
 
-### 🛠️ Developer Experience
-- **Auto-Magic Type Discovery:** No manual IDL compilation or type registration required.
-- **Async/Await:** `WaitDataAsync` for non-blocking, task-based consumers.
-- **Client-Side Filtering:** High-performance predicates (`view => view.Id > 5`) compiled to JIT code.
-- **Instance Management:** O(1) history lookup for keyed topics.
-- **Sender Tracking:** Identify the source application (Computer, PID, custom app id) of every message.
-- **Modern C#:** Events, Properties, and generic constraints instead of listeners and pointers.
+- **Compile-time binding:** generated types implement `IDdsType<T>`; readers and writers are constrained to it, so a missing or invalid type is a build error, not a runtime one.
+- **Build-time diagnostics:** unsupported members are reported as compiler errors at the offending line.
+- **Async/Await:** `WaitDataAsync` and `StreamAsync` for task-based consumers.
+- **Client-side filtering:** a `Predicate<T>` per reader, applied while iterating.
+- **Sender Tracking:** identify the source application (computer, PID, custom app id) of every message.
+- **QoS profiles:** `DdsQos` presets (`Reliable`, `BestEffort`, `KeepAll`, `Latched`, ...) adjustable with `with` expressions.
 
-### 📡 Partitioning & Monitoring
-- **Partition Support:** Isolate traffic using DDS partitions. Set a partition on a participant once and every reader/writer inherits it automatically, or override per-reader/writer with a named argument.
-- **Zero-Allocation WaitSet:** Monitor 100+ readers on a single OS thread. `DdsWaitSet.Wait(Span<IDdsReader>, timeout, ct)` never allocates in the hot path and supports `CancellationToken` for instant, safe interruption.
+### Partitioning & Monitoring
+
+- **Partition Support:** set a partition on a participant once and every reader/writer inherits it, or override it per reader/writer.
+- **Zero-Allocation WaitSet:** monitor 100+ readers on a single OS thread. `DdsWaitSet.Wait(Span<IDdsReader>, timeout, ct)` never allocates in the hot path and supports `CancellationToken`.
 
 ---
 
 ## 1. Defining Data (The Schema)
 
-Define your data using standard C# `partial structs`. The build tools generate the serialization logic automatically.
-
-### High-Performance Schema (Zero Alloc)
-Use this for high-frequency data (1kHz+).
+Declare a `partial` struct or class with `[DdsStruct]`. Its instance fields and auto-properties, in declaration order, are the members of the IDL struct.
 
 ```csharp
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using CycloneDDS.Schema;
 
 namespace Factory.Monitoring;
 
-// Topic name defaults to namespace + class name ("Factory_Monitoring_SensorData") if omitted
-[DdsTopic]
-public partial struct SensorData
-{
-    [DdsKey, DdsId(0)]
-    public int SensorId;
-
-    [DdsId(1)]
-    public double Value;
-
-    // Fixed-size buffer (maps to char[32]). No heap allocation.
-    [DdsId(2)]
-    public FixedString32 LocationId; 
-
-    // Safe, zero-allocation fixed array using C# 12 [InlineArray] (no 'unsafe' needed!)
-    [DdsId(3)]
-    public FloatBuffer8 Measurements;
-
-    // Byte-backed enum yields IDL @bit_bound(8) automatically for optimal native network usage
-    [DdsId(4)]
-    public SensorStatus Status;
-}
-
-[System.Runtime.CompilerServices.InlineArray(8)]
-public struct FloatBuffer8 { private float _element0; }
-
-public enum SensorStatus : byte
-{
-    Offline,
-    Online,
-    Error
-}
-```
-
-### Unmanaged Schema (Unsafe Fixed Buffers)
-For scenarios requiring direct memory manipulation or porting legacy C/C++ structs, you can use `unsafe fixed` arrays. The runtime maps these directly to native memory with zero allocation.
-
-```csharp
-[DdsTopic("CustomTopicNameForVideoFrame")]
-public unsafe partial struct VideoFrame
-{
-    [DdsKey]
-    public int FrameId;
-
-    // Classic C# unsafe fixed-size buffer
-    public fixed byte Pixels[1920 * 1080 * 3];
-}
-```
-
-### Convenient Schema (Managed Types)
-Use this for business logic where convenience outweighs raw speed.
-
-```csharp
-[DdsStruct] // Helper struct to be used in the topic data struct (can be nested)
+[DdsStruct]
 public partial struct GeoPoint { public double Lat; public double Lon; }
 
-[DdsTopic("LogEvents")]
-[DdsManaged] // Opt-in to GC allocations for the whole type
-public partial struct LogEvent
+[DdsStruct]
+public partial struct SensorData
 {
-    [DdsKey] 
-    public int Id;
-
-    // Standard string (Heap allocated)
-    public string Message; 
-    
-    // Standard List (Heap allocated)
-    public List<double> History;
-
-    // Nested custom struct
-    public GeoPoint Origin;
+    public int SensorId;
+    public double Value;
+    public SensorStatus Status;          // byte-backed enum: @bit_bound(8)
+    [DdsBound(32)] public string Location; // string<32>
+    public FloatBuffer8 Measurements;    // float[8], stored inline
+    public GeoPoint Origin;              // nested struct
+    public List<double> History;         // sequence<double>
 }
+
+[InlineArray(8)]
+public struct FloatBuffer8 { private float _element0; }
+
+public enum SensorStatus : byte { Offline, Online, Error }
 ```
+
+The full C# → IDL mapping, the attributes that refine it, and the rules the generator enforces are described in [Code Generation](IDL-GENERATION.md).
 
 ### Configuration & QoS
-You can define Quality of Service settings directly on the type using the `[DdsQos]` attribute. The Runtime automatically applies these settings when creating Writers and Readers for this topic.
+
+QoS is chosen per reader and writer with a `DdsQos` profile. A null profile leaves every policy at Cyclone's default.
 
 ```csharp
-[DdsTopic("MachineState")]
-[DdsQos(
-    Reliability = DdsReliability.Reliable,          // Guarantee delivery
-    Durability = DdsDurability.TransientLocal,      // Late joiners get the last value
-    HistoryKind = DdsHistoryKind.KeepLast,          // Keep only recent data
-    HistoryDepth = 1                                // Only the latest sample
-)]
-public partial struct MachineState
-{
-    [DdsKey]
-    public int MachineId;
-    public StateEnum CurrentState;
-}
+var qos = DdsQos.Reliable with { Durability = DdsDurability.TransientLocal, HistoryDepth = 1 };
+using var writer = new DdsWriter<SensorData>(participant, "MachineState", qos);
 ```
+
 ---
 
 ## 2. Basic Usage
 
 ### Publishing
+
 ```csharp
-using Factory.Monitoring;
 using var participant = new DdsParticipant();
+using var writer = new DdsWriter<SensorData>(participant, "SensorData", DdsQos.Reliable);
 
-// Auto-discovers topic type and its default name ("Factory_Monitoring_SensorData")
-using var writer = new DdsWriter<SensorData>(participant);
-
-// Zero-allocation write path
-var data = new SensorData 
-{ 
-    SensorId = 1, 
-    Value = 25.5,
-    LocationId = new FixedString32("Factory_A"),
-    Status = SensorStatus.Online
-};
-
-// With C# 12, InlineArrays can be accessed directly by index
-data.Measurements[0] = 1.0f; 
+var data = new SensorData { SensorId = 1, Value = 25.5, Location = "Factory_A", Status = SensorStatus.Online };
+data.Measurements[0] = 1.0f;
 
 writer.Write(data);
 ```
 
+`Write` serializes into a pooled buffer. It throws `ArgumentException` if a member breaks its bound or fixed length, and `DdsException` if Cyclone rejects the sample.
+
 ### Subscribing (Polling)
-Reading uses a **Scope** pattern to ensure safety and zero-copy semantics. You "loan" the data, read it, and return it by disposing the scope.
+
+A read or take returns a loan, which holds Cyclone's references to the samples until it is disposed.
 
 ```csharp
-using Factory.Monitoring;
+using var reader = new DdsReader<SensorData>(participant, "SensorData", DdsQos.Reliable);
 
-using var reader = new DdsReader<SensorData>(participant);
-
-// POLL FOR DATA
-// Returns a "Loan" which manages native memory
 using var loan = reader.Take(maxSamples: 10);
-
-// Iterate received data
 foreach (var sample in loan)
 {
-    // `sample.IsValid` indicates whether a full payload is present.
-    // IMPORTANT: even when `ValidData == 0` (lifecycle/metadata-only samples),
-    // the middleware provides the native memory with the topic key fields populated.
-    // Therefore `sample.Data` is safe to call for every sample and will return
-    // a managed object where key fields are set and non-key fields are defaulted.
-
-    // Always obtain the managed copy (safe for metadata-only samples too)
-    var data = sample.Data;
-
     if (sample.IsValid)
     {
-        // OPTION A: Simple (Managed)
-        // `data` is a full managed copy populated from native memory
+        SensorData data = sample.Data; // deserialized from Cyclone's buffer on access
         Console.WriteLine($"Received: {data.SensorId} = {data.Value}");
     }
     else
     {
-        // Lifecycle event (e.g., instance disposed). Key fields are available in `data`.
-        Console.WriteLine($"Instance {data.SensorId} state: {sample.Info.InstanceState}");
+        // An instance state change without data, e.g. the last writer went away
+        Console.WriteLine($"State: {sample.Info.InstanceState}");
     }
-
-    // OPTION B: Fast (Zero-Copy) — you can still use AsView() when you only need
-    // transient, zero-allocation access to the native buffer (stack-only).
-    // var view = sample.AsView();
 }
-
 ```
+
+`sample.Data` deserializes on each access and throws for samples without data.
 
 ---
 
 ## 3. Async/Await (Modern Loop)
 
-Bridge the gap between real-time DDS and .NET Tasks. No blocking threads required.
-
 ```csharp
-Console.WriteLine("Waiting for data...");
-
-// Efficiently waits using TaskCompletionSource (no polling loop)
 while (await reader.WaitDataAsync())
 {
-    // Take all available data
     using var scope = reader.Take();
-    
     foreach (var sample in scope)
     {
-        await ProcessAsync(sample);
+        if (sample.IsValid) Process(sample.Data);
     }
+}
+
+// Or as a stream of samples
+await foreach (var data in reader.StreamAsync(cancellationToken))
+{
+    Process(data);
 }
 ```
 
 ---
 
-## 4. Advanced Filtering
+## 4. Filtering
 
-Filter data **before** you pay the cost of processing it. This implementation uses C# delegates but executes on the raw buffer view, allowing JIT optimizations to make it extremely fast.
+A reader's filter is applied while iterating a loan; samples it rejects are skipped. Each sample is deserialized once, and the value the filter saw is the one `sample.Data` returns.
 
 ```csharp
-// 1. Set a filter predicate on the Reader
-// Logic executes during iteration, skipping irrelevant samples instantly.
-// Since 'view' is a ref struct reading raw memory, this is Zero-Copy filtering.
-reader.SetFilter(view => view.Value > 100.0 && view.LocationId.ToString() == "Lab_1");
+reader.SetFilter(data => data.Value > 100.0 && data.Location == "Lab_1");
 
-// 2. Iterate
 using var scope = reader.Take();
 foreach (var highValueSample in scope)
 {
-    // Guaranteed to be > 100.0 and from Lab_1
+    // Only samples above 100.0 from Lab_1, plus samples without data
 }
 
-// 3. Update filter dynamically at runtime
 reader.SetFilter(null); // Clear filter
 ```
 
 ---
 
-## 5. Instance Management (Keyed Topics)
+## 5. ROS 2
 
-For systems tracking many objects (fleets, tracks, sensors), efficiently query a specific object's history without iterating the entire database.
+Readers and writers interoperate with ROS 2 nodes running `rmw_cyclonedds_cpp`. Three things must line up with ROS's conventions:
+
+| ROS 2 | C# |
+| :--- | :--- |
+| Topic `/chatter` | Topic name `"rt/chatter"` |
+| Type `std_msgs/msg/String` | DDS type name `std_msgs::msg::dds_::String_`: C# type `String_` in namespace `std_msgs.msg.dds_`, or any C# name with `[DdsIdlModule("std_msgs::msg::dds_")]` on a type named `String_` |
+| Default QoS (reliable, volatile, keep last 10) | `DdsQos.Reliable` |
+
+Field types follow the ROS interface definition:
 
 ```csharp
-// 1. Create a key template for the object we care about
-var key = new SensorData { SensorId = 5 };
-
-// 2. Lookup the Handle (O(1) hashing)
-DdsInstanceHandle handle = reader.LookupInstance(key);
-
-if (!handle.IsNil)
+namespace builtin_interfaces.msg.dds_
 {
-    // 3. Read history for ONLY Sensor 5
-    // Ignores Sensor 1, 2, 3... Zero iteration overhead.
-    using var history = reader.ReadInstance(handle, maxSamples: 100);
-    
-    foreach (var snapshot in history)
+    [DdsStruct] public partial struct Time_ { public int sec; public uint nanosec; }
+}
+
+namespace std_msgs.msg.dds_
+{
+    [DdsStruct] public partial struct Header_ { public builtin_interfaces.msg.dds_.Time_ stamp; public string frame_id; }
+}
+
+namespace sensor_msgs.msg.dds_
+{
+    [DdsStruct]
+    public partial class JointState_
     {
-        Plot(snapshot.Value);
+        public std_msgs.msg.dds_.Header_ header;
+        public List<string> name;
+        public List<double> position;
+        public List<double> velocity;
+        public List<double> effort;
     }
 }
 ```
+
+```csharp
+using var reader = new DdsReader<sensor_msgs.msg.dds_.JointState_>(participant, "rt/joint_states", DdsQos.Reliable);
+```
+
+ROS 2 topics are keyless, so a reader's history depth is shared by all writers of a topic.
+
+`wstring` fields are not supported with ROS 2: `[DdsWideString]` uses Cyclone's encoding, which `rmw_cyclonedds_cpp` does not. The test suite exercises each supported shape against the `ros2` CLI in both directions (`tests/CycloneDDS.Runtime.Tests/Ros`); those tests run when a ROS 2 installation is found.
 
 ---
 
@@ -351,6 +276,7 @@ if (!handle.IsNil)
 Identify exactly which application instance sent a message. Essential for multi-process debugging.
 
 ### Sender Configuration
+
 ```csharp
 var config = new SenderIdentityConfig 
 { 
@@ -362,10 +288,11 @@ var config = new SenderIdentityConfig
 participant.EnableSenderTracking(config);
 
 // Now, every writer created by this participant automatically broadcasts identity
-using var writer = new DdsWriter<LogEvent>(participant, "Logs");
+using var writer = new DdsWriter<SensorData>(participant, "SensorData");
 ```
 
 ### Receiver Usage
+
 ```csharp
 // Enable tracking on the reader
 reader.EnableSenderTracking(participant.SenderRegistry);
@@ -373,14 +300,13 @@ reader.EnableSenderTracking(participant.SenderRegistry);
 using var scope = reader.Take();
 for (int i = 0; i < scope.Count; i++)
 {
-    // O(1) Lookup of sender info
     // Returns: ComputerName, ProcessName, ProcessId, AppDomainId, etc.
     var sender = scope.GetSender(i); 
     var msg = scope[i];
 
     if (sender != null)
     {
-        Console.WriteLine($"[{sender.ComputerName} : PID {sender.ProcessId}] says: {msg.Message}");
+        Console.WriteLine($"[{sender.Value.ComputerName} : PID {sender.Value.ProcessId}] sent {msg.Value}");
     }
 }
 ```
@@ -404,28 +330,12 @@ writer.PublicationMatched += (s, status) =>
 // Reliable Startup (Wait for Discovery)
 // Solves the "Lost First Message" problem
 await writer.WaitForReaderAsync(TimeSpan.FromSeconds(5));
-writer.Write(new Message("Hello")); // Guaranteed to have a route
+writer.Write(new SensorData { SensorId = 1 }); // Guaranteed to have a route
 ```
 
 ---
 
-## 8. Lifecycle (Dispose & Unregister)
-
-Properly manage the lifecycle of data instances in the Global Data Space.
-
-```csharp
-var key = new SensorData { SensorId = 1 };
-
-// 1. Data is invalid/deleted
-// Readers receive InstanceState = NOT_ALIVE_DISPOSED
-writer.DisposeInstance(key);
-
-// 2. Writer is shutting down (graceful disconnect)
-// Readers receive InstanceState = NOT_ALIVE_NO_WRITERS (if ownership exclusive)
-writer.UnregisterInstance(key);
-```
-
-## 9. Partitions
+## 8. Partitions
 
 DDS partitions let you divide a domain into named logical channels. Readers and writers only communicate within the same partition, making it easy to run multiple isolated subsystems on the same DDS domain (e.g. separate a monitoring plane from a control plane, or multiplex tenants).
 
@@ -435,9 +345,8 @@ DDS partitions let you divide a domain into named logical channels. Readers and 
 // All readers and writers created from this participant will use "monitoring" automatically.
 using var participant = new DdsParticipant(domainId: 0, defaultPartition: "monitoring");
 
-// Topic name comes from [DdsTopic("SensorData")] — no need to repeat it.
-using var reader = new DdsReader<SensorData>(participant);
-using var writer = new DdsWriter<SensorData>(participant);
+using var reader = new DdsReader<SensorData>(participant, "SensorData");
+using var writer = new DdsWriter<SensorData>(participant, "SensorData");
 ```
 
 ### Override the partition per reader / writer
@@ -450,7 +359,7 @@ using var controlWriter = new DdsWriter<SensorData>(
     participant, "SensorData", partition: "control");
 
 // This reader stays on the default "*" partition — sees everything.
-using var broadcastReader = new DdsReader<SensorData>(participant);
+using var broadcastReader = new DdsReader<SensorData>(participant, "SensorData");
 ```
 
 ### Resolution order
@@ -461,7 +370,7 @@ per-reader / per-writer partition  →  participant.DefaultPartition  →  (no p
 
 ---
 
-## 10. WaitSet — Efficient Multi-Reader Monitoring
+## 9. WaitSet — Efficient Multi-Reader Monitoring
 
 `DdsWaitSet` provides a native-backed mechanism for sleeping on many readers simultaneously on **a single OS thread**. This is ideal for monitoring applications that track 100+ topics and do not want the overhead of spawning a background `Task` per reader.
 
@@ -471,9 +380,9 @@ per-reader / per-writer partition  →  participant.DefaultPartition  →  (no p
 using var participant = new DdsParticipant(0, defaultPartition: "*");
 
 // Create readers for every topic you want to monitor
-using var tempReader    = new DdsReader<TemperatureEvent>(participant);
-using var pressReader   = new DdsReader<PressureEvent>(participant);
-using var statusReader  = new DdsReader<MachineStatus>(participant);
+using var tempReader    = new DdsReader<TemperatureEvent>(participant, "Temperature");
+using var pressReader   = new DdsReader<PressureEvent>(participant, "Pressure");
+using var statusReader  = new DdsReader<MachineStatus>(participant, "MachineStatus");
 
 // Create WaitSet and attach all readers
 using var waitset = new DdsWaitSet(participant);
@@ -518,7 +427,7 @@ Readers can be added or removed while the WaitSet is not waiting, making the mon
 
 ```csharp
 // Start watching a new topic at runtime
-var newReader = new DdsReader<AlarmEvent>(participant);
+var newReader = new DdsReader<AlarmEvent>(participant, "Alarms");
 waitset.Attach(newReader);
 
 // Stop watching (and dispose the reader when no longer needed)
@@ -544,30 +453,19 @@ cts.Cancel(); // triggers the native guard condition, unblocks Wait() instantly
 
 ---
 
-## 11. Legacy IDL Import
-
-If you have existing DDS systems defined in IDL, you can generate the corresponding C# DSL automatically.
-
-```bash
-# Import IDL to C#
-CycloneDDS.IdlImporter MySystem.idl ./src/Generated
-```
-
-This generates C# `[DdsTopic]` structs that are binary-compatible with your existing system.
-See [IDL Import Guide](docs/IDL-IMPORT.md) for advanced usage including multi-module support.
-
----
-
 ## Examples
 
 ### Hello World
+
 A complete "Hello World" example that demonstrates creating a topic, publishing, and subscribing in a single application can be found in [`examples/HelloWorld`](examples/HelloWorld).
 
 This example is designed to verify the NuGet package installation and basic functionality using the locally built package.
 
 To run it:
+
 1. Build the packages: `.\build\pack.ps1`
 2. Run the example:
+
    ```bash
    cd examples/HelloWorld
    dotnet run
@@ -579,22 +477,18 @@ To run it:
 
 The `CycloneDDS.NET` package bundles these internal components:
 
-*   **Managed Libraries:** `CycloneDDS.Core`, `CycloneDDS.Schema`, `CycloneDDS.CodeGen`, `CycloneDDS.Runtime`
-*   **Native Assets (Windows x64):** `ddsc.dll` (Cyclone DDS), `idlc.exe` (IDL Compiler), `cycloneddsidljson.dll` (IDL JSON plugin)
-*   **Native Assets (Linux x64):** `libddsc.so` (Cyclone DDS), `idlc` (IDL Compiler), `libcycloneddsidljson.so` (IDL JSON plugin)
+- **Managed Libraries:** `CycloneDDS.Core` (CDR encoding), `CycloneDDS.Schema` (attributes), `CycloneDDS.Runtime`
+- **Build Tools:** `CycloneDDS.CodeGen` (code generator)
+- **Native Assets (Windows x64):** `ddsc.dll` (Cyclone DDS), `idlc.exe` (IDL Compiler), `cycloneddsidljson.dll` (IDL JSON plugin)
+- **Native Assets (Linux x64):** `libddsc.so` (Cyclone DDS), `idlc` (IDL Compiler), `libcycloneddsidljson.so` (IDL JSON plugin)
 
 ## Performance Characteristics
 
-| Feature | Allocation Cost | Performance Note |
+| Operation | Allocation | Note |
 | :--- | :--- | :--- |
-| **Write** | **0 Bytes** | Uses ArrayPool + NativeArena |
-| **Read (View)** | **0 Bytes** | Uses `.AsView()` + Ref Structs |
-| **Read (Managed)** | Allocates | Uses `.Data` (Deep Copy) |
-| **Take (Polling)** | **0 Bytes** | Uses Loaned Buffers |
-| **Filtering** | **0 Bytes** | Manual loop filtering with Views |
+| **Write** | Payload buffer is pooled | Serialized once into a pooled buffer, copied once by Cyclone |
+| **Read / Take** | Pooled arrays | Samples stay in Cyclone's buffers until accessed |
+| **`sample.Data`** | Allocates reference-type members | Deserialized directly from Cyclone's buffer |
 | **Sender Lookup** | **0 Bytes** | O(1) Dictionary Lookup |
 | **Async Wait** | ~80 Bytes | One Task per `await` cycle |
 | **WaitSet.Wait** | **0 Bytes** | Span output + ArrayPool rent; no heap in hot path |
-
-*Built for speed. Designed for developers.*
-

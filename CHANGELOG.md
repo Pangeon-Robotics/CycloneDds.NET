@@ -6,17 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## unreleased
-nothing yet
+
+### Changed
+
+- **Serialization is generated XCDR1.** Generated code now serializes `[DdsStruct]` types to
+  XCDR1 directly. Writers pass the bytes to Cyclone, which validates them against the idlc
+  descriptor; readers deserialize from Cyclone's buffers. This replaces marshalling into C
+  struct layouts.
+- **Types implement `IDdsType<T>`.** `DdsWriter<T>` and `DdsReader<T>` require it, so an
+  unsupported type is a compile error rather than a runtime failure.
+- **The DDS type name is the IDL scoped name**, so `[DdsIdlModule]` now also sets the name
+  remote endpoints match on.
+- **Schema errors are build errors** reported at the offending member.
+- IDL emission orders types by dependency across modules in one file (previously
+  alphabetical by module), and generated files no longer embed a timestamp.
+
+### Added
+
+- `[DdsWideString]` for `wstring` members (Cyclone's encoding; not compatible with ROS 2's
+  `rmw_cyclonedds_cpp`) and `[DdsElementBound]` for bounded string elements of collections.
+- ROS 2 interop tests against the `ros2` CLI, run when a ROS 2 installation is found.
+
+### Removed
+
+- Zero-copy views (`AsView`, `...View` structs, `ReadCopied`) and the native-layout
+  marshalling (`NativeArena`, `DdsSequenceNative`, `_Native` structs).
+- `[DdsManaged]`, `[DdsOptional]`, `[DdsId]`, `[MaxLength]` (use `[DdsBound]`).
+- Mappings for `Guid`, `DateTime`, `DateTimeOffset`, `TimeSpan` and `System.Numerics` types;
+  C# `fixed` buffers (use `[InlineArray]` or `[ArrayLength]`).
+- Instance APIs of keyless topics: `DisposeInstance`, `UnregisterInstance`, `LookupInstance`,
+  `ReadInstance`, `TakeInstance`, `DdsInstanceHandle`.
+- `DdsTypeSupport`.
 
 ## 0.3.2
 
 ### Fixed
+
 - **SourceLink symbols for the whole library.** `CycloneDDS.Core` and
   `CycloneDDS.Schema` now ship their SourceLink-enabled PDBs in `lib/net8.0`
   (previously only `CycloneDDS.Runtime` did), so consumers can step into all three
   assemblies straight from the package.
 
 ### Added
+
 - **Automatic NuGet publish on a version tag.** Pushing a `vX.Y.Z` tag (e.g. via a
   GitHub Release) builds and verifies the cross-platform package on Windows and
   Linux, then publishes it — and the `ddsmonitor` tool — to NuGet.org. Requires the
@@ -28,6 +60,7 @@ nothing yet
   smoke-testing the package (and the `ddsmonitor` tool) locally on either OS.
 
 ### Changed
+
 - Packing now succeeds on Linux too (Windows-only pack entries are `Exists`-guarded),
   so a per-platform package can be built locally on either OS.
 - CI builds set `ContinuousIntegrationBuild` for deterministic PDBs with normalized
@@ -36,6 +69,7 @@ nothing yet
 ## 0.3.1
 
 ### Added
+
 - **Linux x64 support.** The package now ships native assets for `linux-x64`
   (`libddsc.so`) alongside `win-x64`, and bundles the Linux `idlc` plus its
   `.so` dependencies under `tools/`. A new `build/native-linux.sh` compiles the
@@ -53,6 +87,7 @@ nothing yet
   works on Linux via the platform-aware `idlc` shipped in the package's `tools/`.
 
 ### Fixed
+
 - **DDS matched-status events never fired on Linux.** The publication- and
   subscription-matched listener callbacks passed their 24-byte status struct by
   `ref`, which matches the Windows x64 ABI but not the Linux System V ABI (where
@@ -66,6 +101,7 @@ nothing yet
   (Windows) filesystems; corrected to `src` so the solution builds on Linux.
 
 ### Changed
+
 - CI builds native libraries on both Windows and Linux and produces a single
   cross-platform package. It installs both the .NET 8 and .NET 10 SDKs: the code
   uses C# 13 language features that require the newer compiler, while the target
@@ -75,6 +111,7 @@ nothing yet
 ## 0.2.3
 
 ### Fixed
+
 - **Code-generation stamp file placed outside the generated folder.** A missing path
   separator wrote the incremental stamp as a sibling of the generated directory
   (`...CycloneDdsGeneratedcodegen.stamp`) instead of inside it. When the folder was cleaned
@@ -94,6 +131,7 @@ nothing yet
   type, field, and likely cause) instead of letting `idlc` surface a cryptic error later.
 
 ### Changed
+
 - **Code generation now runs only where it's needed.** Previously the build targets flowed to
   every project in the transitive reference closure and ran the (Roslyn-based) generator
   unconditionally — dozens of needless runs. Generation is now gated to projects that (a) have a
@@ -106,10 +144,12 @@ nothing yet
   with environment differences expressed as overridable properties.
 
 ### Added
+
 - `build/CycloneDDS.NET.props` (imported only for direct package references) and the
   `CycloneDdsCodeGenEnabled` opt-in property.
 
 ## 0.2.2
+
 - Partitions
 - WaitSets
 - Removed Newtonsoft.Json reference
@@ -117,31 +157,31 @@ nothing yet
 - Union fix (critical structural alignment bug causing misaligned DDS union payloads.)
 - Added explicit translation fallback logic for type identity boundaries across foreign assembly contexts.
 - Added support for:
-   - sparse/non-contiguous enums via `@value` annotations,
-   - enum wire sizing bounds (`@bit_bound`),
-   - C# `[InlineArray]` memory patterns,
-   - and explicit generation toggles (`CycloneDdsDisableCodeGen`).
+  - sparse/non-contiguous enums via `@value` annotations,
+  - enum wire sizing bounds (`@bit_bound`),
+  - C# `[InlineArray]` memory patterns,
+  - and explicit generation toggles (`CycloneDdsDisableCodeGen`).
 - DdsMonitor tool (blazor based UI trafic monitor)
-   - Multi-Participant Configuration
-   - Dynamic Topic Discovery from .net assemblies
-   - Topic explorer
-   - Sample list & sample detail windows linked together
-   - Data Grid Customization
-   - Filtering and Sorting
-   - Recording & replay
-   - Sample authoring & sending
-   - Sender tracking
-   - Headless mode (CLI tool)
-   - Traffic stats
-
+  - Multi-Participant Configuration
+  - Dynamic Topic Discovery from .net assemblies
+  - Topic explorer
+  - Sample list & sample detail windows linked together
+  - Data Grid Customization
+  - Filtering and Sorting
+  - Recording & replay
+  - Sample authoring & sending
+  - Sender tracking
+  - Headless mode (CLI tool)
+  - Traffic stats
 
 ### 4. CycloneDDS Code Generator Enhancements
 
-* **Schema Extensions:** 
+- **Schema Extensions:**
 
 ## 0.1.25
 
 ### Added
+
 - Initial public release of CycloneDDS.NET
 - Zero-allocation write path with custom marshaller
 - Zero-copy read path using `ref struct` views
@@ -182,5 +222,3 @@ This project uses [Nerdbank.GitVersioning](https://github.com/dotnet/Nerdbank.Gi
 - **Removed** - Removed features
 - **Fixed** - Bug fixes
 - **Security** - Vulnerability fixes
-
-[Unreleased]: https://github.com/pjanec/CycloneDds.NET/compare/HEAD...HEAD
