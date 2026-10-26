@@ -1,31 +1,25 @@
 using System;
-using System.Linq;
-using System.Reflection;
-using System.Reflection.Emit;
-using System.Buffers;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using CycloneDDS.Core;
 using CycloneDDS.Runtime.Interop;
-using CycloneDDS.Runtime.Memory;
 using CycloneDDS.Runtime.Tracking;
-using CycloneDDS.Schema;
 
 namespace CycloneDDS.Runtime
 {
-    public sealed class DdsWriter<T> : IDisposable
+    public sealed class DdsWriter<T> : IDisposable where T : IDdsType<T>
     {
-        // Cached delegates to prevent allocation per call
-        private static readonly Func<DdsApi.DdsEntity, IntPtr, int> _writeOperation = DdsApi.dds_writecdr;
-        private static readonly Func<DdsApi.DdsEntity, IntPtr, int> _disposeOperation = DdsApi.dds_dispose_serdata;
-        private static readonly Func<DdsApi.DdsEntity, IntPtr, int> _unregisterOperation = DdsApi.dds_unregister_serdata;
-
-
         private DdsEntityHandle? _writerHandle;
         private DdsApi.DdsEntity _topicHandle;
         private DdsParticipant? _participant;
         private readonly string _topicName;
+
+        // Owned by the topic; valid for the writer's lifetime
+        private readonly IntPtr _sertype;
+
+        // Size of the previous sample, so the next serialization rarely regrows its buffer
+        private int _sizeHint = 256;
 
         // Async/Events
         private IntPtr _listener = IntPtr.Zero;
@@ -34,45 +28,6 @@ namespace CycloneDDS.Runtime
         private readonly DdsApi.DdsOnPublicationMatched _publicationMatchedHandler;
         private volatile TaskCompletionSource<bool>? _waitForReaderTaskSource;
         private EventHandler<DdsApi.DdsPublicationMatchedStatus>? _publicationMatched;
-
-        // Native Marshaling Delegates
-        private delegate int GetNativeSizeDelegate(in T sample);
-        private delegate void MarshalToNativeDelegate(in T sample, IntPtr target, ref NativeArena arena);
-
-        private static readonly GetNativeSizeDelegate? _nativeSizer;
-        private static readonly MarshalToNativeDelegate? _nativeMarshaller;
-        private static readonly GetNativeSizeDelegate? _keyNativeSizer;
-        private static readonly MarshalToNativeDelegate? _keyNativeMarshaller;
-
-        private static readonly int _nativeHeadSize;
-        private static readonly int _keyNativeHeadSize;
-
-        private static readonly DdsExtensibilityKind _extensibilityKind;
-
-        static DdsWriter()
-        {
-            var attr = typeof(T).GetCustomAttribute<DdsExtensibilityAttribute>();
-            _extensibilityKind = attr?.Kind ?? DdsExtensibilityKind.Appendable;
-
-            try
-            {
-                // Native Marshaling
-                _nativeSizer = CreateNativeSizerDelegate("GetNativeSize");
-                _nativeMarshaller = CreateNativeMarshallerDelegate("MarshalToNative");
-                var headSizeMethod = typeof(T).GetMethod("GetNativeHeadSize", BindingFlags.Public | BindingFlags.Static);
-                if (headSizeMethod != null) _nativeHeadSize = (int)(headSizeMethod.Invoke(null, null) ?? 0);
-
-                // Native Key Marshaling
-                _keyNativeSizer = CreateNativeSizerDelegate("GetKeyNativeSize");
-                _keyNativeMarshaller = CreateNativeMarshallerDelegate("MarshalKeyToNative");
-                var keyHeadSizeMethod = typeof(T).GetMethod("GetKeyNativeHeadSize", BindingFlags.Public | BindingFlags.Static);
-                if (keyHeadSizeMethod != null) _keyNativeHeadSize = (int)(keyHeadSizeMethod.Invoke(null, null) ?? 0);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[DdsWriter<{typeof(T).Name}>] Failed to create delegates: {ex.Message}");
-            }
-        }
 
         /// <summary>
         /// Creates a writer for <typeparamref name="T"/> on <paramref name="participant"/>.
@@ -89,9 +44,6 @@ namespace CycloneDDS.Runtime
         /// </param>
         /// <param name="partition">Partition to publish into.</param>
         /// <exception cref="ArgumentException"><paramref name="topicName"/> is null or empty.</exception>
-        /// <exception cref="InvalidOperationException">
-        /// <typeparamref name="T"/> lacks the generated native marshalling methods.
-        /// </exception>
         /// <exception cref="DdsException">Cyclone rejected the writer.</exception>
         public DdsWriter(DdsParticipant participant, string topicName, DdsQos? qos = default, string? partition = null)
         {
@@ -100,11 +52,6 @@ namespace CycloneDDS.Runtime
             _participant = participant;
             _topicName = topicName;
             _publicationMatchedHandler = OnPublicationMatched;
-
-            if (_nativeSizer == null || _nativeMarshaller == null)
-            {
-                throw new InvalidOperationException($"Type {typeof(T).Name} does not exhibit expected DDS generated native methods (GetNativeSize, MarshalToNative).");
-            }
 
             // No profile: leave every policy to Cyclone, matching what an empty
             // dds_create_qos() produced before QoS profiles existed.
@@ -129,12 +76,19 @@ namespace CycloneDDS.Runtime
                         IntPtr.Zero);
 
                     if (!writer.IsValid)
-                        throw new DdsException(DdsApi.DdsReturnCode.Error, "Failed to create writer");
+                        throw new DdsException((DdsApi.DdsReturnCode)writer.Handle, $"Failed to create writer for '{topicName}'");
 
                     _writerHandle = new DdsEntityHandle(writer);
+
+                    int ret = DdsApi.dds_get_entity_sertype(writer, out _sertype);
+                    if (ret < 0)
+                        throw new DdsException((DdsApi.DdsReturnCode)ret, $"Failed to get the sertype of the writer for '{topicName}'");
                 }
                 catch
                 {
+                    _writerHandle?.Dispose();
+                    _writerHandle = null;
+
                     // No writer took ownership of the registration, so give it straight back
                     participant.ReleaseTopic<T>(topicName);
                     _topicHandle = DdsApi.DdsEntity.Null;
@@ -155,15 +109,38 @@ namespace CycloneDDS.Runtime
             }
         }
 
+        /// <summary>
+        /// Serializes <paramref name="sample"/> to XCDR1 and publishes it.
+        /// </summary>
+        /// <exception cref="ArgumentException">
+        /// A member violates its bound or fixed length, or a nested class member is null.
+        /// </exception>
+        /// <exception cref="DdsException">
+        /// Cyclone rejected the serialized sample as not matching the topic type, or the write failed.
+        /// </exception>
         public void Write(in T sample)
         {
-            if (_nativeSizer != null && _nativeMarshaller != null)
+            if (_writerHandle == null) throw new ObjectDisposedException(nameof(DdsWriter<T>));
+
+            var writer = new CdrWriter(_sizeHint);
+            try
             {
-                PerformNativeOperation(sample, DdsApi.dds_write, false);
+                T.Serialize(ref writer, in sample);
+                _sizeHint = writer.Length;
+
+                // Cyclone validates the bytes against the topic's ops while building the serdata
+                IntPtr serdata = DdsApi.SerdataFromCdr(_sertype, DdsApi.SerdataKind.Data, writer.WrittenSpan);
+                if (serdata == IntPtr.Zero)
+                    throw new DdsException(DdsApi.DdsReturnCode.BadParameter,
+                        $"Cyclone rejected the serialized {typeof(T).Name}: it does not match the topic's type descriptor");
+
+                // Consumes the reference (except if the writer is deleted concurrently, which leaks it)
+                int ret = DdsApi.dds_writecdr(_writerHandle.NativeHandle, serdata);
+                if (ret < 0) throw new DdsException((DdsApi.DdsReturnCode)ret, $"dds_writecdr failed: {ret}");
             }
-            else
+            finally
             {
-                throw new InvalidOperationException("Native delegates missing.");
+                writer.Dispose();
             }
         }
 
@@ -178,93 +155,6 @@ namespace CycloneDDS.Runtime
 
             return DdsApi.dds_assert_liveliness(_writerHandle.NativeHandle.Handle) == (int)DdsApi.DdsReturnCode.Ok;
         }
-
-        /// <summary>
-        /// Dispose an instance.
-        /// Marks the instance as NOT_ALIVE_DISPOSED in the reader.
-        /// </summary>
-        /// <param name="sample">Sample containing the key to dispose (non-key fields ignored)</param>
-        /// <remarks>
-        /// For keyed topics only. The key fields identify which instance to dispose.
-        /// Non-key fields are serialized but ignored by CycloneDDS.
-        /// This operation maintains the zero-allocation guarantee.
-        /// </remarks>
-        public void DisposeInstance(in T sample)
-        {
-            if (_keyNativeSizer != null && _keyNativeMarshaller != null)
-            {
-                PerformNativeOperation(sample, DdsApi.dds_dispose, true);
-            }
-            else
-            {
-                throw new InvalidOperationException("Native Key delegates missing.");
-            }
-        }
-
-        /// <summary>
-        /// Unregister an instance (writer releases ownership).
-        /// Notifies readers that this writer will no longer update the instance.
-        /// Reader instance state will transition to NOT_ALIVE_NO_WRITERS if no other writers exist.
-        /// </summary>
-        /// <param name="sample">Sample containing the key to unregister (non-key fields ignored)</param>
-        /// <remarks>
-        /// Useful for graceful shutdown or ownership transfer scenarios.
-        /// For keyed topics only. The key fields identify which instance to unregister.
-        /// Non-key fields are serialized but ignored by CycloneDDS.
-        /// This operation maintains the zero-allocation guarantee.
-        /// </remarks>
-        public void UnregisterInstance(in T sample)
-        {
-            if (_keyNativeSizer != null && _keyNativeMarshaller != null)
-            {
-                PerformNativeOperation(sample, DdsApi.dds_unregister_instance, true);
-            }
-            else
-            {
-                throw new InvalidOperationException("Native Key delegates missing.");
-            }
-        }
-
-        private void PerformNativeOperation(in T sample, Func<DdsApi.DdsEntity, IntPtr, int> operation, bool isKey)
-        {
-            if (_writerHandle == null) throw new ObjectDisposedException(nameof(DdsWriter<T>));
-
-            var sizer = isKey ? _keyNativeSizer : _nativeSizer;
-            var marshaller = isKey ? _keyNativeMarshaller : _nativeMarshaller;
-            var headSize = isKey ? _keyNativeHeadSize : _nativeHeadSize;
-
-            // Safety check - should be guaranteed by caller
-            if (sizer == null || marshaller == null) return;
-
-            int totalSize = sizer(sample);
-            byte[] buffer = Arena.Rent(totalSize);
-
-            try
-            {
-                unsafe
-                {
-                    fixed (byte* p = buffer)
-                    {
-                        IntPtr ptr = (IntPtr)p;
-
-                        if (headSize == 0) headSize = totalSize;
-
-                        var span = buffer.AsSpan(0, totalSize);
-                        var arena = new NativeArena(span, ptr, headSize);
-
-                        marshaller(sample, ptr, ref arena);
-
-                        int ret = operation(_writerHandle.NativeHandle, ptr);
-                        if (ret < 0) throw new DdsException((DdsApi.DdsReturnCode)ret, $"Native operation failed: {ret}");
-                    }
-                }
-            }
-            finally
-            {
-                Arena.Return(buffer);
-            }
-        }
-
 
         public event EventHandler<DdsApi.DdsPublicationMatchedStatus>? PublicationMatched
         {
@@ -414,42 +304,6 @@ namespace CycloneDDS.Runtime
             catch { }
         }
 
-        public DdsInstanceHandle LookupInstance(in T keySample)
-        {
-            if (_writerHandle == null) throw new ObjectDisposedException(nameof(DdsWriter<T>));
-
-            if (_keyNativeSizer != null && _keyNativeMarshaller != null)
-            {
-                int size = _keyNativeSizer(keySample);
-                byte[] buffer = Arena.Rent(size);
-                try
-                {
-                    unsafe
-                    {
-                        fixed (byte* p = buffer)
-                        {
-                            int headSize = _keyNativeHeadSize;
-                            if (headSize == 0) headSize = size;
-
-                            IntPtr ptr = (IntPtr)p;
-                            var span = buffer.AsSpan(0, size);
-                            var arena = new NativeArena(span, ptr, headSize);
-
-                            _keyNativeMarshaller(keySample, ptr, ref arena);
-
-                            long handle = DdsApi.dds_lookup_instance(_writerHandle.NativeHandle.Handle, ptr);
-                            return new DdsInstanceHandle(handle);
-                        }
-                    }
-                }
-                finally
-                {
-                    Arena.Return(buffer);
-                }
-            }
-            throw new InvalidOperationException("Native Key delegates missing.");
-        }
-
         public void Dispose()
         {
             if (_writerHandle == null) return;
@@ -473,24 +327,5 @@ namespace CycloneDDS.Runtime
             _topicHandle = DdsApi.DdsEntity.Null;
             _participant = null;
         }
-
-        // --- Delegate Generators ---
-
-        private static GetNativeSizeDelegate? CreateNativeSizerDelegate(string methodName)
-        {
-            var method = typeof(T).GetMethod(methodName, BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(T).MakeByRefType() }, null);
-            if (method == null) return null;
-
-            return (GetNativeSizeDelegate)Delegate.CreateDelegate(typeof(GetNativeSizeDelegate), method);
-        }
-
-        private static MarshalToNativeDelegate? CreateNativeMarshallerDelegate(string methodName)
-        {
-            var method = typeof(T).GetMethod(methodName, BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(T).MakeByRefType(), typeof(IntPtr), typeof(NativeArena).MakeByRefType() }, null);
-            if (method == null) return null;
-
-            return (MarshalToNativeDelegate)Delegate.CreateDelegate(typeof(MarshalToNativeDelegate), method);
-        }
     }
-
 }

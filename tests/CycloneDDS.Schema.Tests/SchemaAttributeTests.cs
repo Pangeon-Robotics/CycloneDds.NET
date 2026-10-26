@@ -1,6 +1,5 @@
 using System;
 using System.Reflection;
-using System.Runtime.InteropServices;
 using Xunit;
 using CycloneDDS.Schema;
 
@@ -14,86 +13,45 @@ namespace CycloneDDS.Schema.Tests
         [DdsStruct]
         class TestClass { }
 
-        struct TestKeyStruct
+        [Fact]
+        public void DdsStruct_AppliesToStructsAndClasses()
         {
-            [DdsKey]
-            public int Id;
+            Assert.NotNull(typeof(TestStruct).GetCustomAttribute<DdsStructAttribute>());
+            Assert.NotNull(typeof(TestClass).GetCustomAttribute<DdsStructAttribute>());
         }
 
-        [DdsUnion]
-        struct TestUnion { }
-
-        [DdsManaged]
-        class TestManagedClass { }
-
-        struct TestManagedField
+        [Theory]
+        [InlineData(0)]
+        [InlineData(-1)]
+        public void LengthAttributes_RejectNonPositiveValues(int value)
         {
-            [DdsManaged]
-            public string Name;
+            Assert.Throws<ArgumentOutOfRangeException>(() => new DdsBoundAttribute(value));
+            Assert.Throws<ArgumentOutOfRangeException>(() => new DdsElementBoundAttribute(value));
+            Assert.Throws<ArgumentOutOfRangeException>(() => new ArrayLengthAttribute(value));
         }
 
         [Fact]
-        public void DdsStruct_CanBeAppliedToStruct()
+        public void LengthAttributes_KeepTheirValue()
         {
-            var attr = typeof(TestStruct).GetCustomAttribute<DdsStructAttribute>();
-            Assert.NotNull(attr);
+            Assert.Equal(5, new DdsBoundAttribute(5).Max);
+            Assert.Equal(6, new DdsElementBoundAttribute(6).Max);
+            Assert.Equal(9, new ArrayLengthAttribute(9).Length);
+        }
+
+        [Theory]
+        [InlineData("")]
+        [InlineData("Types.idl")]
+        [InlineData("dir/Types")]
+        public void DdsIdlFile_RejectsPathsAndExtensions(string fileName)
+        {
+            Assert.Throws<ArgumentException>(() => new DdsIdlFileAttribute(fileName));
         }
 
         [Fact]
-        public void DdsStruct_CanBeAppliedToClass()
+        public void DdsIdlModule_RejectsEmpty()
         {
-            var attr = typeof(TestClass).GetCustomAttribute<DdsStructAttribute>();
-            Assert.NotNull(attr);
-        }
-
-        [Fact]
-        public void DdsKey_CanBeAppliedToField()
-        {
-            var field = typeof(TestKeyStruct).GetField("Id");
-            var attr = field.GetCustomAttribute<DdsKeyAttribute>();
-            Assert.NotNull(attr);
-        }
-
-        [Fact]
-        public void DdsUnion_CanBeAppliedToStruct()
-        {
-            var attr = typeof(TestUnion).GetCustomAttribute<DdsUnionAttribute>();
-            Assert.NotNull(attr);
-        }
-
-        [Fact]
-        public void DdsManaged_CanBeAppliedToClassAndField()
-        {
-            var classAttr = typeof(TestManagedClass).GetCustomAttribute<DdsManagedAttribute>();
-            Assert.NotNull(classAttr);
-
-            var field = typeof(TestManagedField).GetField("Name");
-            var fieldAttr = field.GetCustomAttribute<DdsManagedAttribute>();
-            Assert.NotNull(fieldAttr);
-        }
-
-        [Fact]
-        public void FixedString32_HasCorrectSize()
-        {
-            Assert.Equal(32, Marshal.SizeOf<FixedString32>());
-        }
-
-        [Fact]
-        public void FixedString64_HasCorrectSize()
-        {
-            Assert.Equal(64, Marshal.SizeOf<FixedString64>());
-        }
-
-        [Fact]
-        public void BoundedSeq_EnforcesMaxLength()
-        {
-            var seq = new BoundedSeq<int>(3);
-            seq.Add(1);
-            seq.Add(2);
-            seq.Add(3);
-
-            Assert.Throws<InvalidOperationException>(() => seq.Add(4));
-            Assert.Equal(3, seq.Count);
+            Assert.Throws<ArgumentException>(() => new DdsIdlModuleAttribute(" "));
+            Assert.Equal("std_msgs::msg::dds_", new DdsIdlModuleAttribute("std_msgs::msg::dds_").ModulePath);
         }
     }
 }

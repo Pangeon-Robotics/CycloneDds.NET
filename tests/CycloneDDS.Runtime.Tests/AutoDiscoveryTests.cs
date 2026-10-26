@@ -1,5 +1,6 @@
 using System;
 using Xunit;
+using CycloneDDS.Core;
 using CycloneDDS.Runtime;
 
 namespace CycloneDDS.Runtime.Tests
@@ -18,18 +19,19 @@ namespace CycloneDDS.Runtime.Tests
             _participant.Dispose();
         }
 
-        [Fact]
-        public void GetDescriptorOps_ValidType_ReturnsOps()
-        {
-            var ops = DdsTypeSupport.GetDescriptorOps<TestMessage>();
-            Assert.NotNull(ops);
-            Assert.NotEmpty(ops);
-        }
+        private static DdsTypeDescriptor DescriptorOf<T>() where T : IDdsType<T> => T.Descriptor;
 
         [Fact]
-        public void GetDescriptorOps_InvalidType_Throws()
+        public void Descriptor_GeneratedType_HasOps()
         {
-            Assert.Throws<InvalidOperationException>(() => DdsTypeSupport.GetDescriptorOps<int>());
+            Assert.NotEmpty(DescriptorOf<TestMessage>().Ops);
+        }
+
+        /// <summary>The DDS type name is the scoped IDL name, which remote endpoints match on.</summary>
+        [Fact]
+        public void Descriptor_TypeName_IsScopedIdlName()
+        {
+            Assert.Equal("CycloneDDS::Runtime::Tests::TestMessage", DescriptorOf<TestMessage>().TypeName);
         }
 
         /// <summary>
@@ -111,13 +113,6 @@ namespace CycloneDDS.Runtime.Tests
             // Should succeed without manual descriptor
             using var writer = new DdsWriter<TestMessage>(_participant, "AutoDiscTopic");
             Assert.NotNull(writer);
-        }
-
-        [Fact]
-        public void AutoDiscovery_InvalidType_Throws()
-        {
-            // int has no GetDescriptorOps
-            Assert.Throws<InvalidOperationException>(() => new DdsWriter<int>(_participant, "InvalidTopic"));
         }
     }
 }

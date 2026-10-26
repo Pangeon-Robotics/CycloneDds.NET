@@ -12,7 +12,7 @@ namespace CycloneDDS.Runtime.Tracking
     internal static class CycloneDdsXmlConfig
     {
         private static readonly Lazy<string?> _networkInterfaceAddress =
-            new Lazy<string?>(ResolveNetworkInterfaceAddress, isThreadSafe: true);
+            new(ResolveNetworkInterfaceAddress, isThreadSafe: true);
 
         /// <summary>
         /// Gets the <c>address</c> attribute of the first
@@ -26,16 +26,17 @@ namespace CycloneDDS.Runtime.Tracking
             try
             {
                 var uri = Environment.GetEnvironmentVariable("CYCLONEDDS_URI");
+
                 if (string.IsNullOrWhiteSpace(uri))
                     return null;
 
                 // Strip optional file:// scheme.
                 if (uri.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
-                    uri = uri.Substring(7);
+                    uri = uri[7..];
 
                 // If it looks like a file path, try to load it; otherwise treat as inline XML.
                 string? xmlContent = null;
-                if (uri.StartsWith("<", StringComparison.Ordinal))
+                if (uri.StartsWith('<'))
                 {
                     xmlContent = uri;
                 }
@@ -51,8 +52,7 @@ namespace CycloneDDS.Runtime.Tracking
                 var doc = new XmlDocument();
                 doc.LoadXml(xmlContent);
 
-                var node = doc.SelectSingleNode(
-                    "/CycloneDDS/Domain/General/Interfaces/NetworkInterface/@address");
+                var node = doc.SelectSingleNode("/CycloneDDS/Domain/General/Interfaces/NetworkInterface/@address");
 
                 return node?.Value;
             }

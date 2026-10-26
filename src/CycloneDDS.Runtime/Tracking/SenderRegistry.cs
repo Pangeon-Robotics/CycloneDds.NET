@@ -2,7 +2,6 @@ using System;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
-using CycloneDDS.Runtime.Interop;
 
 using DdsGuid = CycloneDDS.Runtime.Interop.DdsGuid;
 
@@ -27,16 +26,13 @@ namespace CycloneDDS.Runtime.Tracking
         private readonly DdsReader<SenderIdentity> _identityReader;
         private readonly CancellationTokenSource _cancellation = new();
         private readonly Task _monitorTask;
-        private readonly DdsParticipant _participant;
 
         internal SenderRegistry(DdsParticipant participant)
         {
-            _participant = participant;
-
-
-            // Subscribe to identity announcements
-            _identityReader = new DdsReader<SenderIdentity>(
-                participant, "__FcdcSenderIdentity", DdsQos.Latched);
+            // Subscribe to identity announcements. The topic is keyless, so KeepAll keeps identities
+            // from several participants that arrive between two takes.
+            _identityReader = new DdsReader<SenderIdentity>(participant, "__FcdcSenderIdentity",
+                DdsQos.Latched with { HistoryKind = DdsHistoryKind.KeepAll });
 
             // Start async monitoring
             _monitorTask = MonitorIdentitiesAsync();
@@ -130,7 +126,7 @@ namespace CycloneDDS.Runtime.Tracking
             return false;
         }
 
-        private DdsGuid ExtractParticipantGuid(DdsGuid writerGuid)
+        private static DdsGuid ExtractParticipantGuid(DdsGuid writerGuid)
         {
             // DDS GUID structure: [Prefix: 12 bytes][EntityId: 4 bytes]
             // Participant EntityId = 0x000001C1.
@@ -156,12 +152,6 @@ namespace CycloneDDS.Runtime.Tracking
         public void Dispose()
         {
             _cancellation.Cancel();
-            _identityReader?.Dispose();
-            // FIXME: the CTS is disposed before _monitorTask is awaited below, so the loop in
-            // MonitorIdentitiesAsync can read _cancellation.Token on a disposed CTS and throw
-            // ObjectDisposedException (the "[SenderRegistry] Monitor task failed" noise in test
-            // runs). Dispose the CTS only after the monitor task has completed.
-            _cancellation.Dispose();
 
             // Wait for monitor task to complete (with timeout)
             try
@@ -169,6 +159,16 @@ namespace CycloneDDS.Runtime.Tracking
                 _monitorTask?.Wait(TimeSpan.FromSeconds(1));
             }
             catch { /* Best effort */ }
+
+            // Disposed after the wait so an in-flight Take in the monitor loop doesn't hit a
+            // deleted reader. Disposed even on timeout: leaking the native reader is worse, and
+            // a late Take fails with ObjectDisposedException, which the monitor loop catches.
+            _identityReader?.Dispose();
+
+            // The monitor loop reads _cancellation.Token; disposing while it still runs throws
+            // ObjectDisposedException inside it. On timeout, leave the CTS to the GC instead.
+            if (_monitorTask == null || _monitorTask.IsCompleted)
+                _cancellation.Dispose();
         }
     }
 }
