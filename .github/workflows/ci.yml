@@ -123,8 +123,8 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Windows: full build, test and pack via the existing pack.ps1 pipeline
-  # (builds win-x64 native, builds core, runs runtime tests, packs both the
-  # CycloneDDS.NET and DdsMonitor packages, builds the examples). The linux-x64
+  # (builds win-x64 native, builds core, runs runtime tests, packs the
+  # CycloneDDS.NET package, builds the examples). The linux-x64
   # native artifacts produced above are downloaded first so the packed NuGet
   # carries both win-x64 and linux-x64 runtime assets.
   # ---------------------------------------------------------------------------
@@ -249,8 +249,8 @@ jobs:
   # ---------------------------------------------------------------------------
   # Publish to NuGet.org — ONLY on a version tag (vX.Y.Z), and ONLY after the
   # cross-platform package has been verified on both Windows (build) and Linux
-  # (linux-verify). Pushes the packages produced by the build job (both
-  # CycloneDDS.NET and CycloneDDS.NET.DdsMonitor) plus their symbol packages.
+  # (linux-verify). Pushes the packages produced by the build job plus
+  # their symbol packages.
   #
   # Requires a repository secret named NUGET_API_KEY:
   #   Repo -> Settings -> Secrets and variables -> Actions -> New repository secret.

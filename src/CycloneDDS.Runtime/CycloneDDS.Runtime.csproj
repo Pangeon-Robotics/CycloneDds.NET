@@ -22,8 +22,8 @@
          downloads the linux-x64 artifacts before packing. -->
     <None Include="..\..\artifacts\native\linux-x64\libddsc.so" Pack="true" PackagePath="runtimes/linux-x64/native"
           Condition="Exists('..\..\artifacts\native\linux-x64\libddsc.so')" />
-    <None Include="..\..\artifacts\native\linux-x64\libddsc.so.0" Pack="true" PackagePath="runtimes/linux-x64/native"
-          Condition="Exists('..\..\artifacts\native\linux-x64\libddsc.so.0')" />
+    <!-- The SONAME copy, which the security plugins load. Globbed so the version suffix can change. -->
+    <None Include="..\..\artifacts\native\linux-x64\libddsc.so.*" Pack="true" PackagePath="runtimes/linux-x64/native" />
 
     <!-- Runtime: DDS Security plugins. ddsc dlopen()s these by bare name when the
          domain configuration carries a <Security> section; they are NOT reached
@@ -35,25 +35,13 @@
                      therefore sufficient.
            Windows - LoadLibrary() searches the EXECUTABLE's directory, never the
                      runtimes\win-x64\native subfolder that NuGet lays out. They are
-                     staged next to the app by IncludeCycloneDdsWindowsNativeInOutput
+                     staged next to the app by IncludeCycloneDdsSecurityPlugins
                      in build/targets/CycloneDDS.targets; they are packed here so that
                      target has something to copy.
 
          Globs, so a platform-partial local pack silently omits what it doesn't have. -->
     <None Include="..\..\artifacts\native\win-x64\dds_security_*.dll" Pack="true" PackagePath="runtimes/win-x64/native" />
     <None Include="..\..\artifacts\native\linux-x64\libdds_security_*.so" Pack="true" PackagePath="runtimes/linux-x64/native" />
-
-    <!-- Runtime: OpenSSL — Windows only. ENABLE_SSL=ON links OpenSSL into ddsc itself
-         (TCP+TLS), so ddsc.dll has hard import-table entries for these and will not
-         load without them; Windows provides no system OpenSSL. This copy is what
-         ddsc.dll binds against, because the .NET host loads it with
-         LOAD_WITH_ALTERED_SEARCH_PATH — which searches ddsc.dll's OWN directory first.
-         The security plugins need a second copy in the application directory; see
-         IncludeCycloneDdsWindowsNativeInOutput in build/targets/CycloneDDS.targets.
-         Linux resolves libssl/libcrypto from the distribution, so nothing is bundled
-         there. -->
-    <None Include="..\..\artifacts\native\win-x64\libcrypto-*.dll" Pack="true" PackagePath="runtimes/win-x64/native" />
-    <None Include="..\..\artifacts\native\win-x64\libssl-*.dll" Pack="true" PackagePath="runtimes/win-x64/native" />
 
     <!-- Build: Targets (buildTransitive → imported by direct AND transitive consumers) -->
     <None Include="..\..\build\targets\CycloneDDS.targets" Pack="true" PackagePath="buildTransitive/CycloneDDS.NET.targets" />
@@ -67,9 +55,6 @@
     <None Include="..\..\artifacts\native\win-x64\cycloneddsidlc.dll" Pack="true" PackagePath="tools/" Condition="Exists('..\..\artifacts\native\win-x64\cycloneddsidlc.dll')" />
     <None Include="..\..\artifacts\native\win-x64\cycloneddsidljson.dll" Pack="true" PackagePath="tools/" Condition="Exists('..\..\artifacts\native\win-x64\cycloneddsidljson.dll')" />
     <None Include="..\..\artifacts\native\win-x64\ddsc.dll" Pack="true" PackagePath="tools/" Condition="Exists('..\..\artifacts\native\win-x64\ddsc.dll')" />
-    <!-- tools/ carries its own flat copy of ddsc.dll, which imports OpenSSL. -->
-    <None Include="..\..\artifacts\native\win-x64\libcrypto-*.dll" Pack="true" PackagePath="tools/" />
-    <None Include="..\..\artifacts\native\win-x64\libssl-*.dll" Pack="true" PackagePath="tools/" />
 
     <!-- Tools: Native Assets — Linux (idlc + its .so dependencies, flat in tools/).
          The .so globs are skipped silently when the linux-x64 artifacts are absent;
@@ -78,7 +63,8 @@
           Condition="Exists('..\..\artifacts\native\linux-x64\idlc')" />
     <None Include="..\..\artifacts\native\linux-x64\*.so" Pack="true" PackagePath="tools/"
           Exclude="..\..\artifacts\native\linux-x64\libdds_security_*.so" />
-    <None Include="..\..\artifacts\native\linux-x64\*.so.0" Pack="true" PackagePath="tools/" />
+    <!-- SONAME copies, which idlc and its plugins load. -->
+    <None Include="..\..\artifacts\native\linux-x64\*.so.*" Pack="true" PackagePath="tools/" />
 
     <!-- Tools: Shared Managed Libraries -->
     <None Include="..\..\tools\CycloneDDS.CodeGen\bin\$(Configuration)\net8.0\CycloneDDS.Compiler.Common.dll" Pack="true" PackagePath="tools/" />
@@ -135,52 +121,7 @@
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
   </ItemGroup>
 
-  <Target Name="GetNativeVersionInfo" BeforeTargets="GenerateNuspec;Pack">
-    <PropertyGroup>
-      <NativeDir>$(MSBuildProjectDirectory)\..\..\cyclonedds</NativeDir>
-      <UpstreamRepoUrl>https://github.com/eclipse-cyclonedds/cyclonedds</UpstreamRepoUrl>
-    </PropertyGroup>
-    
-    <Exec Command="git rev-parse HEAD" ConsoleToMSBuild="true" WorkingDirectory="$(NativeDir)" StandardOutputImportance="Low">
-      <Output TaskParameter="ConsoleOutput" PropertyName="NativeFullCommit" />
-    </Exec>
-    
-    <Exec Command="git merge-base origin/master HEAD" ConsoleToMSBuild="true" WorkingDirectory="$(NativeDir)" StandardOutputImportance="Low">
-      <Output TaskParameter="ConsoleOutput" PropertyName="NativeBaseCommit" />
-    </Exec>
-
-    <Exec Command="git config --get remote.origin.url" ConsoleToMSBuild="true" WorkingDirectory="$(NativeDir)" StandardOutputImportance="Low">
-      <Output TaskParameter="ConsoleOutput" PropertyName="NativeRepoUrl" />
-    </Exec>
-
-    <PropertyGroup>
-      <NativeVersionInfo>
-{
-  "Original": {
-    "Repository": "$(UpstreamRepoUrl)",
-    "Commit": "$(NativeBaseCommit)"
-  },
-  "Modified": {
-    "Repository": "$(NativeRepoUrl)",
-    "Commit": "$(NativeFullCommit)"
-  }
-}
-      </NativeVersionInfo>
-      <NativeVersionFile>$(IntermediateOutputPath)native_version.json</NativeVersionFile>
-    </PropertyGroup>
-
-    <WriteLinesToFile File="$(NativeVersionFile)" Lines="$(NativeVersionInfo)" Overwrite="true" />
-
-    <ItemGroup>
-      <None Include="$(NativeVersionFile)" Pack="true" PackagePath="/" Visible="false" />
-    </ItemGroup>
-
-    <PropertyGroup>
-      <Description>$(Description)%0a%0aNative Version Information:%0a- Based on Eclipse Cyclone DDS ($(UpstreamRepoUrl)) commit: $(NativeBaseCommit)%0a- Modified from $(NativeRepoUrl) commit: $(NativeFullCommit)</Description>
-      <PackageReleaseNotes>$(PackageReleaseNotes)%0aNative Version Information:%0a- Based on Eclipse Cyclone DDS ($(UpstreamRepoUrl)) commit: $(NativeBaseCommit)%0a- Modified from $(NativeRepoUrl) commit: $(NativeFullCommit)</PackageReleaseNotes>
-    </PropertyGroup>
-  </Target>
-
+  <Import Project="..\..\build\targets\NativeVersionInfo.targets" />
   <Import Project="..\..\tools\CycloneDDS.CodeGen\CycloneDDS.targets" />
 
 </Project>
