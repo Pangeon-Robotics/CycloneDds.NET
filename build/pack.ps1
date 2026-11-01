@@ -17,8 +17,8 @@
 
 param (
     # Reuse the native assets already staged in artifacts/native/win-x64 instead of
-    # rebuilding them. CI passes this when the native build cache hits; the contents
-    # are validated below so a partial or stale cache fails loudly rather than
+    # rebuilding them. CI passes this when its native build cache hits; the contents
+    # are validated below so a partial or stale cache fails loudly instead of
     # producing a package with pieces missing.
     [switch]$SkipNativeBuild
 )
@@ -57,12 +57,6 @@ if ($SkipNativeBuild) {
         "dds_security_crypto.dll"
     )
     $Missing = $Expected | Where-Object { -not (Test-Path (Join-Path $NativeDir $_)) }
-
-    # The OpenSSL runtime DLLs carry a major-version infix (libcrypto-3-x64.dll),
-    # so they are matched by pattern rather than by exact name.
-    $Missing += @("libcrypto-*.dll", "libssl-*.dll") |
-        Where-Object { -not (Get-ChildItem -Path $NativeDir -Filter $_ -File -ErrorAction SilentlyContinue) }
-
     if ($Missing) {
         throw "-SkipNativeBuild was requested but $NativeDir is missing: $($Missing -join ', '). Re-run without -SkipNativeBuild."
     }
@@ -101,6 +95,12 @@ Write-Host "`n[5/6] Packing..." -ForegroundColor Yellow
 # Note: Since we disabled IsPackable on Core/Schema, just packing solution MIGHT skip them or pack only enabled ones.
 # But specifying project is safer.
 $ProjectToPack = "$RepoRoot\src\CycloneDDS.Runtime\CycloneDDS.Runtime.csproj"
+dotnet pack $ProjectToPack -c Release -o $NuGetDir --no-build /p:IncludeSymbols=true /p:SymbolPackageFormat=snupkg
+if ($LASTEXITCODE -ne 0) { throw "Pack failed for $ProjectToPack." }
+
+
+# Pack DdsMonitor as another nuget
+$ProjectToPack = "$RepoRoot\tools\DdsMonitor\DdsMonitor.Blazor\DdsMonitor.csproj"
 dotnet pack $ProjectToPack -c Release -o $NuGetDir --no-build /p:IncludeSymbols=true /p:SymbolPackageFormat=snupkg
 if ($LASTEXITCODE -ne 0) { throw "Pack failed for $ProjectToPack." }
 

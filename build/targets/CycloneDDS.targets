@@ -65,9 +65,15 @@
     <CycloneDdsCodeGenActive Condition="'$(CycloneDdsCodeGenEnabled)' == 'true' AND '$(CycloneDdsDisableCodeGen)' != 'true'">true</CycloneDdsCodeGenActive>
 
     <!-- Where the win-x64 native files live. Default = packaged location
-         (buildTransitive/ -> ../runtimes/win-x64/native/). The in-repo shim points
-         this at the staged native artifacts instead. See target 6. -->
+         (buildTransitive/ -> ../runtimes/win-x64/native/). The in-repo shim points this
+         at the staged native artifacts instead. See target 6. -->
     <CycloneDdsWinNativeDir Condition="'$(CycloneDdsWinNativeDir)' == ''">$(MSBuildThisFileDirectory)..\runtimes\win-x64\native\</CycloneDdsWinNativeDir>
+
+    <!-- Optional (Windows): a folder holding YOUR OpenSSL 3 runtime DLLs
+         (libcrypto-3-x64.dll, libssl-3-x64.dll), e.g. "C:\Program Files\OpenSSL\bin".
+         When set, they are copied next to the application so the DDS Security plugins
+         can load. The package never ships OpenSSL itself. See target 6. -->
+    <_CycloneDdsOpenSslDir Condition="'$(CycloneDdsOpenSslDir)' != ''">$([MSBuild]::EnsureTrailingSlash('$(CycloneDdsOpenSslDir)'))</_CycloneDdsOpenSslDir>
   </PropertyGroup>
 
   <!-- Conditioned so the **\*.cs glob is not even evaluated for projects that don't run codegen. -->
@@ -77,7 +83,7 @@
 
   <!-- Second-level gate: even among projects that opt in (direct package reference), only
        run the generator when the project actually declares something it would emit. The
-       generator's discovery rule is "type is [DdsStruct] OR is an enum"
+       generator's discovery rule is "type is [DdsTopic]/[DdsStruct]/[DdsUnion] OR is an enum"
        (enums always get IDL + a DdsIdlMapping, which is how enum-only contract assemblies
        like GizmoMap.Contracts feed downstream topics). So we skip only when a project has
        NEITHER — a fast in-process source scan, no extra dotnet launch. This mirrors the
@@ -93,7 +99,7 @@
       <Code Type="Fragment" Language="cs"><![CDATA[
         HasSchema = false;
         var rxDds = new System.Text.RegularExpressions.Regex(
-            @"^\s*\[\s*(global::)?([\w.]+\.)?DdsStruct\b",
+            @"^\s*\[\s*Dds(Topic|Struct|Union)\b",
             System.Text.RegularExpressions.RegexOptions.Multiline);
         var rxEnum = new System.Text.RegularExpressions.Regex(
             @"^\s*((public|internal|private|protected|file|static|sealed|partial|new)\s+)*enum\s+\w",
@@ -165,7 +171,7 @@
 
     <!-- Detection runs INSIDE the body (not as a Condition on a dependency): a false target
          Condition skips its DependsOnTargets too, so a property set by a dependency can't gate
-         the same target. Scan the sources for [DdsStruct]/enum; if absent, skip the expensive run. -->
+         the same target. Scan the sources for [Dds*]/enum; if absent, skip the expensive run. -->
     <CycloneDdsDetectSchema Sources="@(CycloneDdsSourceFiles)">
       <Output TaskParameter="HasSchema" PropertyName="CycloneDdsHasSchema" />
     </CycloneDdsDetectSchema>
@@ -234,47 +240,41 @@
     <Copy SourceFiles="@(GeneratedIdlFiles)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
   </Target>
 
-  <!-- 6. Stage the Windows native files that the OS loader can only find in the
-          APPLICATION directory. Two problems, one copy:
+  <!-- 6. Windows: stage the DDS Security plugins next to the application.
+          ddsc loads them with LoadLibrary("dds_security_auth.dll") - a bare name, which
+          Windows resolves from the APPLICATION directory, not from the
+          runtimes\win-x64\native\ folder NuGet uses for DllImport. Without this copy a
+          participant whose configuration contains <Security> fails with "Could not load
+          authentication library". Applications that never configure security never
+          load them.
 
-          a) The DDS Security plugins. ddsc loads these with
-             LoadLibrary("dds_security_auth.dll") — a BARE name, so Windows searches the
-             executable's own directory. NuGet only lays native assets out under
-             $(OutDir)runtimes\win-x64\native\, which LoadLibrary does not consult, so
-             without this copy every participant created against a <Security>
-             configuration fails with "Could not load authentication library".
+          The plugins import OpenSSL 3, which this package deliberately does not ship:
+          provide it on PATH / in the system directories, or set CycloneDdsOpenSslDir to
+          have its DLLs copied here as well.
 
-          b) The OpenSSL runtime DLLs those plugins import. A plain LoadLibrary resolves
-             a module's imports relative to the EXECUTABLE's directory, not the module's
-             own, so the plugins cannot reach the copy in runtimes\win-x64\native\.
-             (That copy is still required — it is the one ddsc.dll itself binds against,
-             since the .NET host loads ddsc with LOAD_WITH_ALTERED_SEARCH_PATH, which
-             searches ddsc.dll's own directory first. Hence both copies.)
+          Linux needs no counterpart: dlopen() resolves the plugins through libddsc.so's
+          RUNPATH ($ORIGIN) and libcrypto comes from the distribution.
 
-          Linux needs no counterpart: dlopen() resolves the bare soname through the
-          DT_RUNPATH of the caller (libddsc.so), which build/native-linux.sh patches to
-          $ORIGIN, and libssl/libcrypto come from the distribution.
-
-          Modelled on target 5 rather than a plain AfterTargets="Build" copy: routing the
-          files through @(Content) means Publish honours them too, not just Build. -->
-  <Target Name="IncludeCycloneDdsWindowsNativeInOutput"
+          Routed through @(Content) so Publish honours it too, not just Build. -->
+  <Target Name="IncludeCycloneDdsSecurityPlugins"
           BeforeTargets="GetCopyToOutputDirectoryItems;AssignTargetPaths"
-          Condition="'$(CycloneDdsStageWinNative)' != 'false' AND
+          Condition="'$(CycloneDdsStageSecurityPlugins)' != 'false' AND
                      ($(RuntimeIdentifier.StartsWith('win')) OR
                       ('$(RuntimeIdentifier)' == '' AND '$(OS)' == 'Windows_NT'))">
     <ItemGroup>
-      <CycloneDdsWinNativeFiles Include="$(CycloneDdsWinNativeDir)dds_security_*.dll" />
-      <CycloneDdsWinNativeFiles Include="$(CycloneDdsWinNativeDir)libcrypto-*.dll" />
-      <CycloneDdsWinNativeFiles Include="$(CycloneDdsWinNativeDir)libssl-*.dll" />
+      <CycloneDdsSecurityFiles Include="$(CycloneDdsWinNativeDir)dds_security_*.dll" />
+      <CycloneDdsSecurityFiles Include="$(_CycloneDdsOpenSslDir)libcrypto-*.dll;$(_CycloneDdsOpenSslDir)libssl-*.dll"
+                               Condition="'$(_CycloneDdsOpenSslDir)' != ''" />
 
-      <!-- Flat Link: these must land directly in the output dir, not in a subfolder
-           mirroring their source path. -->
-      <Content Include="@(CycloneDdsWinNativeFiles)">
+      <!-- Flat Link: these must land directly in the output dir. -->
+      <Content Include="@(CycloneDdsSecurityFiles)">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         <Visible>false</Visible>
         <Link>%(Filename)%(Extension)</Link>
       </Content>
     </ItemGroup>
+    <Warning Condition="'$(CycloneDdsOpenSslDir)' != '' AND !Exists('$(CycloneDdsOpenSslDir)')"
+             Text="CycloneDdsOpenSslDir is set to '$(CycloneDdsOpenSslDir)', which does not exist; OpenSSL DLLs were not copied." />
   </Target>
 
   <!-- 7. Clean target — removes the generated dir AND the stamp inside it. -->
