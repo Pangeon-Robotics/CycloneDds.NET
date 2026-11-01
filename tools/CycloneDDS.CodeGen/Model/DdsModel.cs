@@ -1,3 +1,6 @@
+using System.Text.RegularExpressions;
+using Microsoft.CodeAnalysis.CSharp;
+
 namespace CycloneDDS.CodeGen.Model
 {
     /// <summary>
@@ -22,9 +25,15 @@ namespace CycloneDDS.CodeGen.Model
         public bool IsExternal { get; init; }
 
         /// <summary>Fully qualified C# name, usable in generated code.</summary>
-        public string CSharpReference => Namespace.Length == 0 ? $"global::{Name}" : $"global::{Namespace}.{Name}";
+        public string CSharpReference => Namespace.Length == 0 ? $"global::{CSharpName}" : $"global::{CSharpNamespace}.{CSharpName}";
 
-        /// <summary>C# full name without the <c>global::</c> prefix, as recorded in <c>[DdsIdlMapping]</c>.</summary>
+        /// <summary>Simple name as written in generated C#.</summary>
+        public string CSharpName => CSharpIdentifier.Escape(Name);
+
+        /// <summary>Namespace as written in generated C#.</summary>
+        public string CSharpNamespace => string.Join(".", Namespace.Split('.').Select(CSharpIdentifier.Escape));
+
+        /// <summary>C# full name without the <c>global::</c> prefix or keyword escapes, as recorded in <c>[DdsIdlMapping]</c>.</summary>
         public string CSharpFullName => Namespace.Length == 0 ? Name : $"{Namespace}.{Name}";
 
         /// <summary>Scoped IDL name without leading <c>::</c> or identifier escapes; also the DDS type name.</summary>
@@ -34,17 +43,24 @@ namespace CycloneDDS.CodeGen.Model
         public IEnumerable<string> IdlScope => IdlModule.Length == 0 ? [] : IdlModule.Split("::").Select(IdlIdentifier.Unescaped);
     }
 
+    /// <summary>Symbols give names without their <c>@</c>, which generated C# must restore for keywords.</summary>
+    public static class CSharpIdentifier
+    {
+        public static string Escape(string name) => SyntaxFacts.GetKeywordKind(name) == SyntaxKind.None ? name : $"@{name}";
+    }
+
     /// <summary>
     /// IDL reserves a leading underscore as a keyword escape, which idlc strips and allows only
     /// once. A C# name therefore keeps none of its leading underscores in IDL.
     /// </summary>
     public static class IdlIdentifier
     {
+        private static readonly Regex Pattern = new("^[A-Za-z][A-Za-z0-9_]*$", RegexOptions.Compiled);
+
         public static string Unescaped(string name) => name.TrimStart('_');
 
-        /// <summary>False for names like <c>_</c> or <c>_1</c>, which are left with no valid IDL identifier.</summary>
-        public static bool IsRepresentable(string name) =>
-            Unescaped(name) is { Length: > 0 } unescaped && !char.IsDigit(unescaped[0]);
+        /// <summary>False for names like <c>_</c>, <c>_1</c> or non-ASCII ones, which idlc cannot read.</summary>
+        public static bool IsRepresentable(string name) => Pattern.IsMatch(Unescaped(name));
     }
 
     /// <summary>A <c>[DdsStruct]</c> type, emitted as an IDL <c>@final</c> struct.</summary>

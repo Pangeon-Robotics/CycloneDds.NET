@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using CycloneDDS.CodeGen.Discovery;
 using CycloneDDS.CodeGen.Emit;
 using CycloneDDS.CodeGen.Model;
@@ -14,6 +15,8 @@ namespace CycloneDDS.CodeGen
     public sealed class CodeGenerator
     {
         private const string IdlMapFile = "CycloneDDS.IdlMap.g.cs";
+
+        private static readonly Regex IdlInclude = new("^\\s*#include\\s+\"([^\"]+)\\.idl\"", RegexOptions.Multiline);
 
         /// <summary>Thrown when the schema is invalid; the message lists every diagnostic.</summary>
         public sealed class SchemaException(IReadOnlyList<SchemaDiagnostic> diagnostics)
@@ -84,13 +87,17 @@ namespace CycloneDDS.CodeGen
                 .Select(t => t!)
                 .DistinctBy(t => t.CSharpFullName);
 
+            // Case-insensitive so a name that only clashes on Windows fails everywhere
+            var localFiles = new HashSet<string>(idlFiles.Keys, StringComparer.OrdinalIgnoreCase);
+
             foreach (var type in externals)
             {
-                // The local file would overwrite the copy that declares this type
-                if (idlFiles.ContainsKey(type.IdlFile))
+                // The local file would overwrite a copy this type's declaration depends on
+                if (LocalFileInIncludeTree(type.IdlFile, localFiles, outputDir) is { } clash)
                 {
+                    string via = string.Equals(clash, type.IdlFile, StringComparison.OrdinalIgnoreCase) ? "" : $", which includes {clash}.idl";
                     schema.Diagnostics.Add(new SchemaDiagnostic(
-                        $"'{type.CSharpFullName}' is declared in a referenced assembly's {type.IdlFile}.idl, the name of a local IDL file too. " +
+                        $"'{type.CSharpFullName}' is declared in a referenced assembly's {type.IdlFile}.idl{via}, the name of a local IDL file too. " +
                         "Rename the local one with [DdsIdlFile].", null));
                     continue;
                 }
@@ -103,6 +110,28 @@ namespace CycloneDDS.CodeGen
             }
 
             ThrowIfInvalid(schema);
+        }
+
+        /// <summary>The first file named like a local one among <paramref name="root"/> and the referenced IDL it includes, if any.</summary>
+        private static string? LocalFileInIncludeTree(string root, HashSet<string> localFiles, string outputDir)
+        {
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var pending = new Stack<string>([root]);
+
+            while (pending.Count > 0)
+            {
+                string file = pending.Pop();
+                if (!visited.Add(file)) continue;
+                if (localFiles.Contains(file)) return file;
+
+                string path = Path.Combine(outputDir, $"{file}.idl");
+                if (!File.Exists(path)) continue;
+
+                foreach (Match include in IdlInclude.Matches(File.ReadAllText(path)))
+                    pending.Push(include.Groups[1].Value);
+            }
+
+            return null;
         }
 
         private static NamedType? ReferencedType(Shape shape) => shape switch

@@ -321,6 +321,54 @@ namespace T
         }
 
         [Fact]
+        public void UnusedEnumeratorNamedLikeModule_GivesWay()
+        {
+            var schema = DiscoverValid(@"
+using CycloneDDS.Schema;
+namespace App { public enum Mode { Sim } }
+namespace App.Sim
+{
+    public enum Kept { A }
+    [DdsStruct] public partial struct S { public int X; }
+}");
+            // The module stays for S, so the enum inside it need not go too
+            Assert.Equal(["Kept"], schema.Enums.Select(e => e.Name));
+        }
+
+        [Fact]
+        public void UnusedEnumNamedLikeType_GivesWay()
+        {
+            var schema = DiscoverValid(@"
+using CycloneDDS.Schema;
+namespace App
+{
+    public enum S { A }
+    [DdsStruct] public partial struct s { public int X; }
+}");
+            Assert.Empty(schema.Enums);
+        }
+
+        [Theory]
+        [InlineData("namespace App { public enum Mode { Sim } [DdsStruct] public partial struct U { public Mode M; } } namespace App.Sim { [DdsStruct] public partial struct S { public int X; } }", "App::Sim")]
+        [InlineData("namespace App { [DdsStruct] public partial struct Sim { public int X; } } namespace App.Sim { [DdsStruct] public partial struct S { public int X; } }", "App::Sim")]
+        [InlineData("namespace App { [DdsStruct] public partial struct sim { public int X; } } namespace App.Sim { [DdsStruct] public partial struct S { public int X; } }", "App::")]
+        public void ModuleCollisions_AreRejected(string declarations, string expected)
+        {
+            var schema = Discover($"using CycloneDDS.Schema; {declarations}");
+            Assert.Contains(schema.Diagnostics, d => d.Message.Contains(expected) && d.Message.Contains("all map to IDL name"));
+        }
+
+        [Theory]
+        [InlineData("[DdsStruct] public partial struct S { public int Grösse; }", "S.Grösse")]
+        [InlineData("[DdsStruct] public partial struct Größe { public int X; }", "Größe")]
+        [InlineData("[DdsStruct, DdsIdlModule(\"Größe\")] public partial struct S { public int X; }", "Größe")]
+        public void NonAsciiNames_AreReportedAtTheDeclaration(string declaration, string expected)
+        {
+            var schema = Discover($"using CycloneDDS.Schema; namespace T {{ {declaration} }}");
+            Assert.Contains(schema.Diagnostics, d => d.Message.Contains(expected) && d.Location != null);
+        }
+
+        [Fact]
         public void EnumsInDifferentModules_DoNotCollide()
         {
             var schema = DiscoverValid("namespace A { public enum Color { None } } namespace B { public enum Mode { None } }");

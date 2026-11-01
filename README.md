@@ -122,6 +122,8 @@ public enum SensorStatus : byte { Offline, Online, Error }
 
 Enums used by a `[DdsStruct]` need a member with value 0, because an unset C# enum holds 0 and Cyclone rejects undeclared values.
 
+An enum that no `[DdsStruct]` in its own project uses is left out of the IDL, without a diagnostic, when it cannot be expressed in IDL or its names collide with another declaration. This keeps unrelated enums in an application from breaking its build. In a project that only declares enums for others to use, the symptom is a `no [assembly: DdsIdlMapping]` error in the project that uses the enum; using the enum from a `[DdsStruct]` in its own project reports the actual cause.
+
 ### Configuration & QoS
 
 QoS is chosen per reader and writer with a `DdsQos` profile. A null profile leaves every policy at Cyclone's default.

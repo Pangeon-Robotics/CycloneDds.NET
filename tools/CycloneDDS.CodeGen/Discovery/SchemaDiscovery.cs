@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using CycloneDDS.CodeGen.Model;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -23,7 +22,12 @@ namespace CycloneDDS.CodeGen.Discovery
         private const string DdsWideStringAttribute = "CycloneDDS.Schema.DdsWideStringAttribute";
         private const string InlineArrayAttribute = "System.Runtime.CompilerServices.InlineArrayAttribute";
 
-        private static readonly Regex IdlIdentifierPattern = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.Compiled);
+        private const string IdentifierRule = "after any leading underscores, IDL allows an ASCII letter followed by ASCII letters, digits or underscores";
+
+        // Keyword-named symbols display as written in source otherwise, with their @
+        private static readonly SymbolDisplayFormat UnescapedName = new(
+            globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
+            typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces);
 
         private readonly Compilation _compilation;
         private readonly DdsSchema _schema = new();
@@ -113,7 +117,6 @@ namespace CycloneDDS.CodeGen.Discovery
 
             CheckCycles();
             CheckIdlNameCollisions();
-            CheckEnumeratorCollisions();
             return _schema;
         }
 
@@ -171,7 +174,7 @@ namespace CycloneDDS.CodeGen.Discovery
 
             string idlModule = IdlModuleOf(symbol);
             if (UnrepresentableIdentifier(symbol.Name, idlModule) is { } identifier)
-                Error($"[DdsStruct] type '{symbol.Name}': '{identifier}' has no valid IDL identifier once its leading underscores are removed.", location);
+                Error($"[DdsStruct] type '{symbol.Name}': '{identifier}' has no valid IDL identifier: {IdentifierRule}.", location);
 
             if (_schema.Diagnostics.Count > errors) return;
 
@@ -257,7 +260,7 @@ namespace CycloneDDS.CodeGen.Discovery
             if (StringArgument(symbol.GetAttributes(), DdsIdlModuleAttribute) is { } module)
             {
                 var segments = module.Split("::");
-                if (segments.Any(s => !IdlIdentifierPattern.IsMatch(s)))
+                if (segments.Any(s => !IdlIdentifier.IsRepresentable(s)))
                     Error($"[DdsIdlModule(\"{module}\")] on '{symbol.Name}' must be identifiers separated by '::'.", symbol.Locations[0]);
                 return module;
             }
@@ -327,7 +330,7 @@ namespace CycloneDDS.CodeGen.Discovery
                 }
 
                 if (!IdlIdentifier.IsRepresentable(member.Name))
-                    Error($"'{symbol.Name}.{member.Name}' has no valid IDL identifier once its leading underscores are removed.", location);
+                    Error($"'{symbol.Name}.{member.Name}' has no valid IDL identifier: {IdentifierRule}.", location);
 
                 if (shape != null)
                     structType.Fields.Add(new Field(member.Name, shape, member is IPropertySymbol));
@@ -563,7 +566,7 @@ namespace CycloneDDS.CodeGen.Discovery
         /// </summary>
         private (string File, string Module)? ExternalMapping(INamedTypeSymbol symbol, string name, Location location)
         {
-            string fullName = symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).Replace("global::", "");
+            string fullName = symbol.ToDisplayString(UnescapedName);
 
             foreach (var attribute in symbol.ContainingAssembly.GetAttributes())
             {
@@ -621,22 +624,12 @@ namespace CycloneDDS.CodeGen.Discovery
             }
         }
 
-        private void CheckIdlNameCollisions()
-        {
-            var groups = _schema.LocalTypes.GroupBy(t => t.IdlName, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1);
-            foreach (var group in groups)
-            {
-                Error($"Types {string.Join(", ", group.Select(t => $"'{t.CSharpFullName}'"))} all map to IDL name '{group.Key}' " +
-                      "(IDL names are case-insensitive). Rename one or give it a different [DdsIdlModule].", null);
-            }
-        }
-
         /// <summary>
-        /// IDL declares enumerators in the enclosing module, beside its types. An enum no local
-        /// struct uses gives way, so unrelated enums in an application project cannot break its
-        /// build; a collision the local types depend on is an error.
+        /// IDL declares types, enumerators and modules in one case-insensitive scope. A declaration
+        /// only unused enums need gives way, so unrelated enums in an application project cannot
+        /// break its build; a collision the local types depend on is an error.
         /// </summary>
-        private void CheckEnumeratorCollisions()
+        private void CheckIdlNameCollisions()
         {
             var referenced = _schema.Structs
                 .SelectMany(s => s.Fields)
@@ -644,31 +637,54 @@ namespace CycloneDDS.CodeGen.Discovery
                 .OfType<EnumType>()
                 .ToHashSet();
 
-            var declarations = _schema.LocalTypes
-                .Select(t => (t.IdlScope, t.Name, Owner: t, IsEnumerator: false))
-                .Concat(_schema.Enums.SelectMany(e => e.Members.Select(m => (e.IdlScope, m.Name, Owner: (NamedType)e, IsEnumerator: true))));
+            bool GivesWay(IdlDeclaration d) => d.Owners.All(o => o is EnumType e && !referenced.Contains(e));
 
-            var collisions = declarations
-                .GroupBy(d => string.Join("::", d.IdlScope.Append(IdlIdentifier.Unescaped(d.Name))), StringComparer.OrdinalIgnoreCase)
-                .Where(g => g.Count() > 1 && g.Any(d => d.IsEnumerator)) // Type against type is CheckIdlNameCollisions'
+            var collisions = IdlDeclarations()
+                .GroupBy(d => d.ScopedName, StringComparer.OrdinalIgnoreCase)
+                .Where(g => g.Count() > 1 && g.Any(d => !d.IsModule)) // idlc accepts modules differing only in case
                 .ToList();
 
             var unused = collisions
-                .SelectMany(g => g.Select(d => d.Owner))
+                .SelectMany(g => g)
+                .Where(GivesWay)
+                .SelectMany(d => d.Owners)
                 .OfType<EnumType>()
-                .Where(e => !referenced.Contains(e))
                 .ToHashSet();
             _schema.Enums.RemoveAll(unused.Contains);
 
             foreach (var group in collisions)
             {
-                var owners = group.Where(d => d.Owner is not EnumType e || !unused.Contains(e)).ToList();
-                if (owners.Count > 1)
-                {
-                    Error($"'{group.Key}' is declared more than once in IDL by {string.Join(", ", owners.Select(d => $"'{d.Owner.CSharpFullName}'").Distinct())}. " +
-                          "Enumerators share their module's scope, and IDL names are case-insensitive. Rename one or give it a different [DdsIdlModule].", null);
-                }
+                var kept = group.Where(d => !GivesWay(d)).ToList();
+                if (kept.Count < 2 || kept.All(d => d.IsModule)) continue;
+
+                var owners = kept.SelectMany(d => d.Owners).Where(o => o is not EnumType e || !unused.Contains(e)).Distinct();
+                Error($"{string.Join(", ", owners.Select(o => $"'{o.CSharpFullName}'"))} all map to IDL name '{group.Key}'. IDL names are " +
+                      "case-insensitive, and enumerators and modules share their enclosing scope with types. Rename one or give it a different [DdsIdlModule].", null);
             }
+        }
+
+        /// <summary>A name IDL declares, and the local types that need it.</summary>
+        private sealed record IdlDeclaration(string ScopedName, IReadOnlyList<NamedType> Owners, bool IsModule = false);
+
+        private IEnumerable<IdlDeclaration> IdlDeclarations()
+        {
+            static string Scoped(IEnumerable<string> scope, string name) => string.Join("::", scope.Append(IdlIdentifier.Unescaped(name)));
+
+            foreach (var type in _schema.LocalTypes)
+                yield return new IdlDeclaration(type.IdlName, [type]);
+
+            foreach (var enumType in _schema.Enums)
+            {
+                foreach (var member in enumType.Members)
+                    yield return new IdlDeclaration(Scoped(enumType.IdlScope, member.Name), [enumType]);
+            }
+
+            // A module is one declaration, however many types reopen it
+            var modules = _schema.LocalTypes
+                .SelectMany(t => t.IdlScope.Select((segment, depth) => (Path: Scoped(t.IdlScope.Take(depth), segment), Type: t)))
+                .GroupBy(m => m.Path);
+            foreach (var module in modules)
+                yield return new IdlDeclaration(module.Key, module.Select(m => m.Type).Distinct().ToList(), IsModule: true);
         }
 
         /// <summary>The struct a member's shape refers to, directly or as its collection element.</summary>
@@ -719,7 +735,7 @@ namespace CycloneDDS.CodeGen.Discovery
             module.Split("::", StringSplitOptions.RemoveEmptyEntries).Append(name).FirstOrDefault(s => !IdlIdentifier.IsRepresentable(s));
 
         private static string NamespaceOf(INamedTypeSymbol symbol) =>
-            symbol.ContainingNamespace is { IsGlobalNamespace: false } ns ? ns.ToDisplayString() : "";
+            symbol.ContainingNamespace is { IsGlobalNamespace: false } ns ? ns.ToDisplayString(UnescapedName) : "";
 
         private static bool IsPartial(INamedTypeSymbol symbol) =>
             symbol.DeclaringSyntaxReferences

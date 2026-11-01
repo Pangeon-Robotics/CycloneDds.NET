@@ -27,11 +27,11 @@ namespace CycloneDDS.CodeGen.Emit
             string indent = hasNamespace ? "    " : "";
             if (hasNamespace)
             {
-                sb.AppendLine($"namespace {type.Namespace}");
+                sb.AppendLine($"namespace {type.CSharpNamespace}");
                 sb.AppendLine("{");
             }
 
-            sb.AppendLine($"{indent}partial {type.DeclarationKind} {type.Name} : {iface}");
+            sb.AppendLine($"{indent}partial {type.DeclarationKind} {type.CSharpName} : {iface}");
             sb.AppendLine($"{indent}{{");
 
             var body = new CodeBlock(sb, indent + "    ");
@@ -70,7 +70,7 @@ namespace CycloneDDS.CodeGen.Emit
             for (int i = 0; i < type.Fields.Count; i++)
             {
                 var field = type.Fields[i];
-                WriteMember(code, field.Shape, $"value.{field.Name}", $"{type.Name}.{field.Name}", i);
+                WriteMember(code, field.Shape, $"value.{CSharpIdentifier.Escape(field.Name)}", $"{type.Name}.{field.Name}", i);
             }
             code.Close();
         }
@@ -156,7 +156,7 @@ namespace CycloneDDS.CodeGen.Emit
             for (int i = 0; i < type.Fields.Count; i++)
             {
                 var field = type.Fields[i];
-                ReadMember(code, field.Shape, $"value.{field.Name}", i);
+                ReadMember(code, field.Shape, $"value.{CSharpIdentifier.Escape(field.Name)}", i);
             }
             code.Line("return value;");
             code.Close();

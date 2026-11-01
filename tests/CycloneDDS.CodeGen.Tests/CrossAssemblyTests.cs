@@ -218,6 +218,84 @@ namespace SameNameB { [DdsStruct] public partial struct Bar { public SameNameA.F
         }
 
         [Fact]
+        public void LocalIdlFileNamedLikeOneIncludedTransitively_ClearError()
+        {
+            var folderA = CreateProject("IncludedA", ("Base.cs", @"
+namespace IncludedA { [CycloneDDS.Schema.DdsStruct] public partial struct Inner { public int X; } }"));
+            string dllA = CompileProject("IncludedA", folderA);
+
+            var folderB = CreateProject("IncludedB", ("Types.cs", @"
+namespace IncludedB { [CycloneDDS.Schema.DdsStruct] public partial struct Outer { public IncludedA.Inner I; } }"));
+            string dllB = CompileProject("IncludedB", folderB, [dllA]);
+
+            var folderC = CreateProject("IncludedC", ("Base.cs", @"
+namespace IncludedC { [CycloneDDS.Schema.DdsStruct] public partial struct User { public IncludedB.Outer O; } }"));
+
+            var ex = Assert.Throws<CodeGenerator.SchemaException>(() => CompileProject("IncludedC", folderC, [dllB, dllA]));
+            Assert.Contains("Types.idl, which includes Base.idl", ex.Message);
+        }
+
+        [Fact]
+        public void LocalIdlFileDifferingOnlyInCaseFromReferencedOne_ClearError()
+        {
+            var folderA = CreateProject("CaseA", ("Messages.cs", @"
+namespace CaseA { [CycloneDDS.Schema.DdsStruct] public partial struct Foo { public int X; } }"));
+            string dllA = CompileProject("CaseA", folderA);
+
+            var folderB = CreateProject("CaseB", ("messages.cs", @"
+namespace CaseB { [CycloneDDS.Schema.DdsStruct] public partial struct Bar { public CaseA.Foo F; } }"));
+
+            var ex = Assert.Throws<CodeGenerator.SchemaException>(() => CompileProject("CaseB", folderB, [dllA]));
+            Assert.Contains("Messages.idl", ex.Message);
+            Assert.Contains("[DdsIdlFile]", ex.Message);
+        }
+
+        [Fact]
+        public void UnusedEnumeratorNamedLikeModule_PassesIdlc()
+        {
+            var folder = CreateProject("EnumModule", ("Types.cs", @"
+using CycloneDDS.Schema;
+namespace App { public enum Mode { Sim } }
+namespace App.Sim { [DdsStruct] public partial struct S { public int X; } }"));
+
+            CompileProject("EnumModule", folder);
+        }
+
+        [Fact]
+        public void ModulesDifferingOnlyInCase_PassIdlc()
+        {
+            var folder = CreateProject("ModuleCase", ("Types.cs", @"
+using CycloneDDS.Schema;
+namespace App.Sim { [DdsStruct] public partial struct A { public int X; } }
+namespace App.sim { [DdsStruct] public partial struct B { public int X; } }"));
+
+            CompileProject("ModuleCase", folder);
+        }
+
+        [Fact]
+        public void CSharpKeywordNames_Compile_AcrossAssemblies()
+        {
+            // Compiling fails if generated code loses an @; idlc must accept the same names
+            var folderA = CreateProject("KeywordA", ("Types.cs", @"
+using CycloneDDS.Schema;
+namespace KeywordA.@class {
+    public enum @enum { @default, @checked }
+    [DdsStruct] public partial struct @struct { public int @event; public @enum @params { get; set; } public int[] @lock; }
+}"));
+            string dllA = CompileProject("KeywordA", folderA);
+
+            var folderB = CreateProject("KeywordB", ("User.cs", @"
+using CycloneDDS.Schema;
+namespace KeywordB {
+    [DdsStruct] public partial struct User { public KeywordA.@class.@struct S; public KeywordA.@class.@enum E; }
+}"));
+            CompileProject("KeywordB", folderB, [dllA]);
+
+            var map = File.ReadAllText(Path.Combine(GeneratedDir(folderA), "CycloneDDS.IdlMap.g.cs"));
+            Assert.Contains("DdsIdlMapping(\"KeywordA.class.struct\", \"Types\", \"KeywordA::class\")", map);
+        }
+
+        [Fact]
         public void KeywordAndUnderscoreNames_PassIdlc()
         {
             // Keywords in every position, referenced across modules and against idlc's real parser
