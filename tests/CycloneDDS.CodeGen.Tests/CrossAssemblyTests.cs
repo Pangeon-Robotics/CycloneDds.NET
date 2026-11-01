@@ -199,5 +199,64 @@ namespace UsesUnmapped { [DdsStruct] public partial struct User { public Unmappe
             Assert.Contains("DdsIdlMapping", ex.Message);
             Assert.Contains("User.cs", ex.Message);
         }
+
+        [Fact]
+        public void LocalIdlFileNamedLikeReferencedOne_ClearError()
+        {
+            var folderA = CreateProject("SameNameA", ("Messages.cs", @"
+using CycloneDDS.Schema;
+namespace SameNameA { [DdsStruct] public partial struct Foo { public int X; } }"));
+            string dllA = CompileProject("SameNameA", folderA);
+
+            var folderB = CreateProject("SameNameB", ("Messages.cs", @"
+using CycloneDDS.Schema;
+namespace SameNameB { [DdsStruct] public partial struct Bar { public SameNameA.Foo F; } }"));
+
+            var ex = Assert.Throws<CodeGenerator.SchemaException>(() => CompileProject("SameNameB", folderB, [dllA]));
+            Assert.Contains("Messages.idl", ex.Message);
+            Assert.Contains("[DdsIdlFile]", ex.Message);
+        }
+
+        [Fact]
+        public void KeywordAndUnderscoreNames_PassIdlc()
+        {
+            // Keywords in every position, referenced across modules and against idlc's real parser
+            var folder = CreateProject("Keywords", ("Types.cs", @"
+using CycloneDDS.Schema;
+namespace Company.Public.Module {
+    public enum Enum { Case, _Default }
+    [DdsStruct] public partial struct Map { public int _value; public Enum Struct; }
+    [DdsStruct] public partial struct _Under { public Map Sequence; private int __hidden; }
+}"));
+
+            CompileProject("Keywords", folder);
+
+            var idl = File.ReadAllText(Path.Combine(GeneratedDir(folder), "Types.idl"));
+            Assert.Contains("module _Public {", idl);
+            Assert.Contains("module _Module {", idl);
+            Assert.Contains("struct _Map {", idl);
+            Assert.Contains("enum _Enum {", idl);
+            Assert.Contains("struct Under {", idl);
+            Assert.Contains("::Company::_Public::_Module::_Map _Sequence;", idl);
+            Assert.Contains("int32 value;", idl);
+            Assert.Contains("int32 hidden;", idl);
+
+            // The DDS type name carries no escapes
+            var generated = File.ReadAllText(Path.Combine(GeneratedDir(folder), "Company.Public.Module.Map.g.cs"));
+            Assert.Contains("\"Company::Public::Module::Map\"", generated);
+        }
+
+        [Fact]
+        public void ProjectBelowFolderNamedLikeAnExclusion_KeepsItsSources()
+        {
+            var folder = Path.Combine(TempDir, "Generated", "App");
+            Directory.CreateDirectory(Path.Combine(folder, "obj"));
+            File.WriteAllText(Path.Combine(folder, "Kept.cs"), "namespace App { [CycloneDDS.Schema.DdsStruct] public partial struct Kept { public int X; } }");
+            File.WriteAllText(Path.Combine(folder, "obj", "Skipped.cs"), "namespace App { [CycloneDDS.Schema.DdsStruct] public partial struct Skipped { public int X; } }");
+
+            var schema = CycloneDDS.CodeGen.Discovery.SchemaDiscovery.Discover(folder, null);
+
+            Assert.Equal(["Kept"], System.Linq.Enumerable.Select(schema.Structs, s => s.Name));
+        }
     }
 }

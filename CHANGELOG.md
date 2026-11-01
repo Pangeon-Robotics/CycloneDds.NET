@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The DDS type name is the IDL scoped name**, so `[DdsIdlModule]` now also sets the name
   remote endpoints match on.
 - **Schema errors are build errors** reported at the offending member.
+- **Enums used by a `[DdsStruct]` need a member with value 0**, the value of an unset C# enum,
+  which Cyclone would otherwise reject on write.
 - IDL emission orders types by dependency across modules in one file (previously
   alphabetical by module), and generated files no longer embed a timestamp.
 

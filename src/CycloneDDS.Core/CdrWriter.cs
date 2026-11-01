@@ -184,6 +184,15 @@ namespace CycloneDDS.Core
             T.Serialize(ref this, in value);
         }
 
+        /// <summary>The elements a null fixed-length struct array is written as; class elements would otherwise be null.</summary>
+        public static T[] DefaultStructs<T>(int length) where T : IDdsType<T>
+        {
+            var defaults = new T[length];
+            foreach (ref T item in defaults.AsSpan())
+                item = T.CreateDefault();
+            return defaults;
+        }
+
         /// <summary>Throws when a fixed-length array does not have its declared length.</summary>
         public static void ThrowArrayLength(string member, int expected, int actual) =>
             throw new ArgumentException($"{member} has {actual} elements; its fixed length is {expected}.");

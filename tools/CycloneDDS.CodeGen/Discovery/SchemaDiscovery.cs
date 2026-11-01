@@ -23,7 +23,7 @@ namespace CycloneDDS.CodeGen.Discovery
         private const string DdsWideStringAttribute = "CycloneDDS.Schema.DdsWideStringAttribute";
         private const string InlineArrayAttribute = "System.Runtime.CompilerServices.InlineArrayAttribute";
 
-        private static readonly Regex IdlIdentifier = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.Compiled);
+        private static readonly Regex IdlIdentifierPattern = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.Compiled);
 
         private readonly Compilation _compilation;
         private readonly DdsSchema _schema = new();
@@ -32,7 +32,7 @@ namespace CycloneDDS.CodeGen.Discovery
         private readonly Dictionary<INamedTypeSymbol, StructType> _structs = new(SymbolEqualityComparer.Default);
         private readonly Dictionary<INamedTypeSymbol, EnumType> _enums = new(SymbolEqualityComparer.Default);
 
-        // Local enums that cannot be expressed in IDL, with the reason; an error only once referenced
+        // Local enums that cannot be DDS enums, with the reason; an error only once referenced
         private readonly Dictionary<INamedTypeSymbol, string> _unrepresentableEnums = new(SymbolEqualityComparer.Default);
 
         private SchemaDiscovery(Compilation compilation)
@@ -57,11 +57,12 @@ namespace CycloneDDS.CodeGen.Discovery
             if (!Directory.Exists(sourceDirectory))
                 throw new DirectoryNotFoundException($"Source directory not found: {sourceDirectory}");
 
+            // Matched below sourceDirectory, so the project's own location cannot exclude it
             char sep = Path.DirectorySeparatorChar;
             string[] excludedDirs = [$"{sep}obj{sep}", $"{sep}bin{sep}", $"{sep}Generated{sep}"];
 
             var trees = Directory.GetFiles(sourceDirectory, "*.cs", SearchOption.AllDirectories)
-                .Where(f => !excludedDirs.Any(f.Contains))
+                .Where(f => !excludedDirs.Any((sep + Path.GetRelativePath(sourceDirectory, f)).Contains))
                 .OrderBy(f => f, StringComparer.Ordinal)
                 .Select(f => CSharpSyntaxTree.ParseText(File.ReadAllText(f), path: f))
                 .ToList();
@@ -112,6 +113,7 @@ namespace CycloneDDS.CodeGen.Discovery
 
             CheckCycles();
             CheckIdlNameCollisions();
+            CheckEnumeratorCollisions();
             return _schema;
         }
 
@@ -167,13 +169,17 @@ namespace CycloneDDS.CodeGen.Discovery
                     Error($"[DdsStruct] class '{symbol.Name}' needs a parameterless constructor for deserialization.", location);
             }
 
+            string idlModule = IdlModuleOf(symbol);
+            if (UnrepresentableIdentifier(symbol.Name, idlModule) is { } identifier)
+                Error($"[DdsStruct] type '{symbol.Name}': '{identifier}' has no valid IDL identifier once its leading underscores are removed.", location);
+
             if (_schema.Diagnostics.Count > errors) return;
 
             var structType = new StructType
             {
                 Name = symbol.Name,
                 Namespace = NamespaceOf(symbol),
-                IdlModule = IdlModuleOf(symbol),
+                IdlModule = idlModule,
                 IdlFile = IdlFileOf(symbol),
                 DeclarationKind = (symbol.IsRecord, symbol.TypeKind) switch
                 {
@@ -190,17 +196,7 @@ namespace CycloneDDS.CodeGen.Discovery
 
         private void DeclareEnum(INamedTypeSymbol symbol)
         {
-            PrimitiveKind? underlying = symbol.EnumUnderlyingType?.SpecialType switch
-            {
-                SpecialType.System_Byte => PrimitiveKind.Byte,
-                SpecialType.System_SByte => PrimitiveKind.SByte,
-                SpecialType.System_Int16 => PrimitiveKind.Int16,
-                SpecialType.System_UInt16 => PrimitiveKind.UInt16,
-                SpecialType.System_Int32 => PrimitiveKind.Int32,
-                SpecialType.System_UInt32 => PrimitiveKind.UInt32,
-                _ => null,
-            };
-
+            PrimitiveKind? underlying = EnumUnderlying(symbol);
             if (underlying == null)
             {
                 _unrepresentableEnums[symbol] = "its underlying type is 64-bit; IDL enums are at most 32-bit";
@@ -212,10 +208,16 @@ namespace CycloneDDS.CodeGen.Discovery
                 .Select(f => new EnumMember(f.Name, Convert.ToInt64(f.ConstantValue)))
                 .ToList();
 
+            string idlModule = IdlModuleOf(symbol);
+
             string? problem =
                 members.Count == 0 ? "it has no members" :
                 members.Any(m => m.Value < 0) ? "it has negative values" :
+                // C# zero-initializes enums, and Cyclone rejects a value the enum does not declare
+                members.All(m => m.Value != 0) ? "it has no member with value 0, so an unset member could not be written" :
                 members.Select(m => m.Value).Distinct().Count() != members.Count ? "two members share a value" :
+                UnrepresentableIdentifier(symbol.Name, idlModule) is { } identifier ? $"'{identifier}' has no valid IDL identifier" :
+                members.FirstOrDefault(m => !IdlIdentifier.IsRepresentable(m.Name)) is { } member ? $"'{member.Name}' has no valid IDL identifier" :
                 null;
 
             if (problem != null)
@@ -228,7 +230,7 @@ namespace CycloneDDS.CodeGen.Discovery
             {
                 Name = symbol.Name,
                 Namespace = NamespaceOf(symbol),
-                IdlModule = IdlModuleOf(symbol),
+                IdlModule = idlModule,
                 IdlFile = IdlFileOf(symbol),
                 Underlying = underlying.Value,
             };
@@ -255,7 +257,7 @@ namespace CycloneDDS.CodeGen.Discovery
             if (StringArgument(symbol.GetAttributes(), DdsIdlModuleAttribute) is { } module)
             {
                 var segments = module.Split("::");
-                if (segments.Any(s => !IdlIdentifier.IsMatch(s)))
+                if (segments.Any(s => !IdlIdentifierPattern.IsMatch(s)))
                     Error($"[DdsIdlModule(\"{module}\")] on '{symbol.Name}' must be identifiers separated by '::'.", symbol.Locations[0]);
                 return module;
             }
@@ -297,6 +299,11 @@ namespace CycloneDDS.CodeGen.Discovery
                             Error($"'{symbol.Name}.{field.Name}' is a fixed buffer; use an [InlineArray] struct or [ArrayLength] T[] instead.", location);
                             continue;
                         }
+                        if (field.IsRequired)
+                        {
+                            Error($"'{symbol.Name}.{field.Name}' is required; deserialization creates the type without setting it.", location);
+                            continue;
+                        }
                         shape = ResolveMember(field, field.Type, isProperty: false);
                         break;
 
@@ -307,12 +314,20 @@ namespace CycloneDDS.CodeGen.Discovery
                             Error($"'{symbol.Name}.{property.Name}' needs a setter; deserialization must assign it.", location);
                             continue;
                         }
+                        if (property.IsRequired)
+                        {
+                            Error($"'{symbol.Name}.{property.Name}' is required; deserialization creates the type without setting it.", location);
+                            continue;
+                        }
                         shape = ResolveMember(property, property.Type, isProperty: true);
                         break;
 
                     default:
                         continue;
                 }
+
+                if (!IdlIdentifier.IsRepresentable(member.Name))
+                    Error($"'{symbol.Name}.{member.Name}' has no valid IDL identifier once its leading underscores are removed.", location);
 
                 if (shape != null)
                     structType.Fields.Add(new Field(member.Name, shape, member is IPropertySymbol));
@@ -321,11 +336,11 @@ namespace CycloneDDS.CodeGen.Discovery
             if (structType.Fields.Count == 0)
                 Error($"[DdsStruct] type '{symbol.Name}' has no members; IDL structs need at least one.", symbol.Locations[0]);
 
-            // IDL identifiers collide case-insensitively, including with the enclosing type's name
-            foreach (var group in structType.Fields.GroupBy(f => f.Name, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
-                Error($"'{symbol.Name}' has members differing only in case ({string.Join(", ", group.Select(f => f.Name))}); IDL identifiers are case-insensitive.", symbol.Locations[0]);
-            foreach (var field in structType.Fields.Where(f => string.Equals(f.Name, symbol.Name, StringComparison.OrdinalIgnoreCase)))
-                Error($"'{symbol.Name}.{field.Name}' differs from its type's name only in case; IDL identifiers are case-insensitive.", symbol.Locations[0]);
+            // IDL identifiers collide case-insensitively and without leading underscores, including with the enclosing type's name
+            foreach (var group in structType.Fields.GroupBy(f => IdlIdentifier.Unescaped(f.Name), StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
+                Error($"'{symbol.Name}' has members differing only in case or leading underscores ({string.Join(", ", group.Select(f => f.Name))}); they are one IDL identifier.", symbol.Locations[0]);
+            foreach (var field in structType.Fields.Where(f => string.Equals(IdlIdentifier.Unescaped(f.Name), IdlIdentifier.Unescaped(symbol.Name), StringComparison.OrdinalIgnoreCase)))
+                Error($"'{symbol.Name}.{field.Name}' differs from its type's name only in case or leading underscores; they are one IDL identifier.", symbol.Locations[0]);
         }
 
         private Shape? ResolveMember(ISymbol member, ITypeSymbol type, bool isProperty)
@@ -338,6 +353,14 @@ namespace CycloneDDS.CodeGen.Discovery
 
             string name = $"{member.ContainingType.Name}.{member.Name}";
             Location location = member.Locations[0];
+
+            // Discovery reads the raw arguments; the attributes' own checks run only under reflection
+            if (bound <= 0)
+                Error($"'{name}': [DdsBound] must be greater than 0.", location);
+            if (elementBound <= 0)
+                Error($"'{name}': [DdsElementBound] must be greater than 0.", location);
+            if (arrayLength <= 0)
+                Error($"'{name}': [ArrayLength] must be greater than 0.", location);
 
             bool boundUsed = false, elementBoundUsed = false, arrayLengthUsed = false, wideUsed = false;
             Shape? shape;
@@ -402,22 +425,7 @@ namespace CycloneDDS.CodeGen.Discovery
 
         private Shape? ResolveScalar(ITypeSymbol type, string name, Location location)
         {
-            PrimitiveKind? primitive = type.SpecialType switch
-            {
-                SpecialType.System_Boolean => PrimitiveKind.Bool,
-                SpecialType.System_Byte => PrimitiveKind.Byte,
-                SpecialType.System_SByte => PrimitiveKind.SByte,
-                SpecialType.System_Int16 => PrimitiveKind.Int16,
-                SpecialType.System_UInt16 => PrimitiveKind.UInt16,
-                SpecialType.System_Int32 => PrimitiveKind.Int32,
-                SpecialType.System_UInt32 => PrimitiveKind.UInt32,
-                SpecialType.System_Int64 => PrimitiveKind.Int64,
-                SpecialType.System_UInt64 => PrimitiveKind.UInt64,
-                SpecialType.System_Single => PrimitiveKind.Single,
-                SpecialType.System_Double => PrimitiveKind.Double,
-                _ => null,
-            };
-            if (primitive != null) return new PrimitiveShape(primitive.Value);
+            if (PrimitiveOf(type.SpecialType) is { } primitive) return new PrimitiveShape(primitive);
 
             if (type.SpecialType == SpecialType.System_Char)
             {
@@ -517,7 +525,7 @@ namespace CycloneDDS.CodeGen.Discovery
 
             if (_unrepresentableEnums.TryGetValue(symbol, out var reason))
             {
-                Error($"'{name}' uses enum '{symbol.Name}', which cannot be expressed in IDL: {reason}.", location);
+                Error($"'{name}' uses enum '{symbol.Name}', which cannot be a DDS enum: {reason}.", location);
                 return null;
             }
 
@@ -529,15 +537,11 @@ namespace CycloneDDS.CodeGen.Discovery
 
             if (ExternalMapping(symbol, name, location) is not { } mapping) return null;
 
-            PrimitiveKind underlying = symbol.EnumUnderlyingType?.SpecialType switch
+            if (EnumUnderlying(symbol) is not { } underlying)
             {
-                SpecialType.System_Byte => PrimitiveKind.Byte,
-                SpecialType.System_SByte => PrimitiveKind.SByte,
-                SpecialType.System_Int16 => PrimitiveKind.Int16,
-                SpecialType.System_UInt16 => PrimitiveKind.UInt16,
-                SpecialType.System_UInt32 => PrimitiveKind.UInt32,
-                _ => PrimitiveKind.Int32,
-            };
+                Error($"'{name}' uses enum '{symbol.Name}', which cannot be expressed in IDL: its underlying type is 64-bit.", location);
+                return null;
+            }
 
             var external = new EnumType
             {
@@ -575,7 +579,7 @@ namespace CycloneDDS.CodeGen.Discovery
 
             Error($"'{name}' uses '{fullName}' from assembly '{symbol.ContainingAssembly.Name}', which has no [assembly: DdsIdlMapping] " +
                   "for it. That assembly was built without CycloneDDS code generation (check for a stale generated folder), " +
-                  "or the type is not a DDS type.", location);
+                  "the type is not a DDS type, or it is an enum that assembly left out of its IDL as unusable.", location);
             return null;
         }
 
@@ -627,6 +631,46 @@ namespace CycloneDDS.CodeGen.Discovery
             }
         }
 
+        /// <summary>
+        /// IDL declares enumerators in the enclosing module, beside its types. An enum no local
+        /// struct uses gives way, so unrelated enums in an application project cannot break its
+        /// build; a collision the local types depend on is an error.
+        /// </summary>
+        private void CheckEnumeratorCollisions()
+        {
+            var referenced = _schema.Structs
+                .SelectMany(s => s.Fields)
+                .Select(f => ReferencedEnum(f.Shape))
+                .OfType<EnumType>()
+                .ToHashSet();
+
+            var declarations = _schema.LocalTypes
+                .Select(t => (t.IdlScope, t.Name, Owner: t, IsEnumerator: false))
+                .Concat(_schema.Enums.SelectMany(e => e.Members.Select(m => (e.IdlScope, m.Name, Owner: (NamedType)e, IsEnumerator: true))));
+
+            var collisions = declarations
+                .GroupBy(d => string.Join("::", d.IdlScope.Append(IdlIdentifier.Unescaped(d.Name))), StringComparer.OrdinalIgnoreCase)
+                .Where(g => g.Count() > 1 && g.Any(d => d.IsEnumerator)) // Type against type is CheckIdlNameCollisions'
+                .ToList();
+
+            var unused = collisions
+                .SelectMany(g => g.Select(d => d.Owner))
+                .OfType<EnumType>()
+                .Where(e => !referenced.Contains(e))
+                .ToHashSet();
+            _schema.Enums.RemoveAll(unused.Contains);
+
+            foreach (var group in collisions)
+            {
+                var owners = group.Where(d => d.Owner is not EnumType e || !unused.Contains(e)).ToList();
+                if (owners.Count > 1)
+                {
+                    Error($"'{group.Key}' is declared more than once in IDL by {string.Join(", ", owners.Select(d => $"'{d.Owner.CSharpFullName}'").Distinct())}. " +
+                          "Enumerators share their module's scope, and IDL names are case-insensitive. Rename one or give it a different [DdsIdlModule].", null);
+                }
+            }
+        }
+
         /// <summary>The struct a member's shape refers to, directly or as its collection element.</summary>
         public static StructType? ReferencedStruct(Shape shape) => shape switch
         {
@@ -636,10 +680,43 @@ namespace CycloneDDS.CodeGen.Discovery
             _ => null,
         };
 
+        /// <summary>The enum a member's shape refers to, directly or as its collection element.</summary>
+        public static EnumType? ReferencedEnum(Shape shape) => shape switch
+        {
+            EnumShape e => e.Type,
+            SequenceShape { Element: EnumShape e } => e.Type,
+            ArrayShape { Element: EnumShape e } => e.Type,
+            _ => null,
+        };
+
 
         // ---- Helpers ---------------------------------------------------------------
 
         private void Error(string message, Location? location) => _schema.Diagnostics.Add(new SchemaDiagnostic(message, location));
+
+        private static PrimitiveKind? PrimitiveOf(SpecialType type) => type switch
+        {
+            SpecialType.System_Boolean => PrimitiveKind.Bool,
+            SpecialType.System_Byte => PrimitiveKind.Byte,
+            SpecialType.System_SByte => PrimitiveKind.SByte,
+            SpecialType.System_Int16 => PrimitiveKind.Int16,
+            SpecialType.System_UInt16 => PrimitiveKind.UInt16,
+            SpecialType.System_Int32 => PrimitiveKind.Int32,
+            SpecialType.System_UInt32 => PrimitiveKind.UInt32,
+            SpecialType.System_Int64 => PrimitiveKind.Int64,
+            SpecialType.System_UInt64 => PrimitiveKind.UInt64,
+            SpecialType.System_Single => PrimitiveKind.Single,
+            SpecialType.System_Double => PrimitiveKind.Double,
+            _ => null,
+        };
+
+        /// <summary>The primitive an enum travels as; null when it is wider than an IDL enum allows.</summary>
+        private static PrimitiveKind? EnumUnderlying(INamedTypeSymbol symbol) =>
+            symbol.EnumUnderlyingType is { } type && PrimitiveOf(type.SpecialType) is { } kind && kind.Size() <= 4 ? kind : null;
+
+        /// <summary>The first of a type's name and module segments with no IDL identifier, if any.</summary>
+        private static string? UnrepresentableIdentifier(string name, string module) =>
+            module.Split("::", StringSplitOptions.RemoveEmptyEntries).Append(name).FirstOrDefault(s => !IdlIdentifier.IsRepresentable(s));
 
         private static string NamespaceOf(INamedTypeSymbol symbol) =>
             symbol.ContainingNamespace is { IsGlobalNamespace: false } ns ? ns.ToDisplayString() : "";

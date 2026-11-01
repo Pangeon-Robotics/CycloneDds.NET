@@ -14,6 +14,9 @@ namespace CycloneDDS.Core
 
         /// <summary>Reads one value from <paramref name="reader"/>.</summary>
         static abstract TSelf Deserialize(ref CdrReader reader);
+
+        /// <summary>A new default value; generated in the type so a non-public constructor is reachable.</summary>
+        static abstract TSelf CreateDefault();
     }
 
     /// <summary>

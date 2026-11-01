@@ -40,6 +40,8 @@ namespace CycloneDDS.CodeGen.Emit
             EmitSerialize(body, type, iface);
             sb.AppendLine();
             EmitDeserialize(body, type, iface);
+            sb.AppendLine();
+            body.Line($"static {self} {iface}.CreateDefault() => new {self}();");
 
             sb.AppendLine($"{indent}}}");
             if (hasNamespace) sb.AppendLine("}");
@@ -91,7 +93,10 @@ namespace CycloneDDS.CodeGen.Emit
                     if (array.Kind != CollectionKind.InlineArray)
                     {
                         // A null array writes default elements; any other length is a caller error
-                        code.Line($"if ({access} == null) __span{index} = new {ElementType(array.Element)}[{array.Length}];");
+                        string defaults = array.Element is StructShape
+                            ? $"{Core}.CdrWriter.DefaultStructs<{ElementType(array.Element)}>({array.Length})"
+                            : $"new {ElementType(array.Element)}[{array.Length}]";
+                        code.Line($"if ({access} == null) __span{index} = {defaults};");
                         code.Line($"else if (__span{index}.Length != {array.Length}) {Core}.CdrWriter.ThrowArrayLength(\"{member}\", {array.Length}, __span{index}.Length);");
                     }
                     WriteElements(code, array.Element, $"__span{index}", member, index);

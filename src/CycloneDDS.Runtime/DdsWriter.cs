@@ -113,7 +113,7 @@ namespace CycloneDDS.Runtime
         /// Serializes <paramref name="sample"/> to XCDR1 and publishes it.
         /// </summary>
         /// <exception cref="ArgumentException">
-        /// A member violates its bound or fixed length, or a nested class member is null.
+        /// A member violates its bound or fixed length, or the sample or a nested class member is null.
         /// </exception>
         /// <exception cref="DdsException">
         /// Cyclone rejected the serialized sample as not matching the topic type, or the write failed.
@@ -121,6 +121,7 @@ namespace CycloneDDS.Runtime
         public void Write(in T sample)
         {
             if (_writerHandle == null) throw new ObjectDisposedException(nameof(DdsWriter<T>));
+            if (sample is null) throw new ArgumentNullException(nameof(sample));
 
             var writer = new CdrWriter(_sizeHint);
             try

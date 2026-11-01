@@ -27,8 +27,24 @@ namespace CycloneDDS.CodeGen.Model
         /// <summary>C# full name without the <c>global::</c> prefix, as recorded in <c>[DdsIdlMapping]</c>.</summary>
         public string CSharpFullName => Namespace.Length == 0 ? Name : $"{Namespace}.{Name}";
 
-        /// <summary>Scoped IDL name without leading <c>::</c>; also the DDS type name.</summary>
-        public string IdlName => IdlModule.Length == 0 ? Name : $"{IdlModule}::{Name}";
+        /// <summary>Scoped IDL name without leading <c>::</c> or identifier escapes; also the DDS type name.</summary>
+        public string IdlName => string.Join("::", IdlScope.Append(IdlIdentifier.Unescaped(Name)));
+
+        /// <summary>The module path as idlc reads it, outermost first.</summary>
+        public IEnumerable<string> IdlScope => IdlModule.Length == 0 ? [] : IdlModule.Split("::").Select(IdlIdentifier.Unescaped);
+    }
+
+    /// <summary>
+    /// IDL reserves a leading underscore as a keyword escape, which idlc strips and allows only
+    /// once. A C# name therefore keeps none of its leading underscores in IDL.
+    /// </summary>
+    public static class IdlIdentifier
+    {
+        public static string Unescaped(string name) => name.TrimStart('_');
+
+        /// <summary>False for names like <c>_</c> or <c>_1</c>, which are left with no valid IDL identifier.</summary>
+        public static bool IsRepresentable(string name) =>
+            Unescaped(name) is { Length: > 0 } unescaped && !char.IsDigit(unescaped[0]);
     }
 
     /// <summary>A <c>[DdsStruct]</c> type, emitted as an IDL <c>@final</c> struct.</summary>

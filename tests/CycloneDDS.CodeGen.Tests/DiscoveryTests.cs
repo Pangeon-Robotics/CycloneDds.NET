@@ -96,11 +96,11 @@ namespace T
         public int A;
         public int B { get; set; }
         public int Computed => A + B;
-        private int _c;
+        private int _d;
     }
 }");
             var fields = schema.Structs.Single().Fields;
-            Assert.Equal(["A", "B", "_c"], fields.Select(f => f.Name));
+            Assert.Equal(["A", "B", "_d"], fields.Select(f => f.Name));
             Assert.Equal([false, true, false], fields.Select(f => f.IsProperty));
         }
 
@@ -128,7 +128,8 @@ namespace T
     public enum Plain { A, B }
     public enum Negative { A = -1 }
     public enum Big : long { A }
-    public enum Aliased { A = 1, B = 1 }
+    public enum Aliased { A = 0, B = 0 }
+    public enum NoZero { C = 1 }
     public static class Holder { public enum Nested { A } }
 }");
             Assert.Equal(["Plain"], schema.Enums.Select(e => e.Name));
@@ -206,6 +207,14 @@ namespace T
         }
 
         [Fact]
+        public void ReferencedEnumWithoutZeroMember_IsRejected()
+        {
+            var errors = ErrorsOf("[DdsStruct] public partial struct S { public NoZero X; }", "public enum NoZero { A = 1, B = 2 }");
+            Assert.Contains("NoZero", errors);
+            Assert.Contains("value 0", errors);
+        }
+
+        [Fact]
         public void NestedEnum_IsRejected()
         {
             Assert.Contains("nested in a type",
@@ -236,6 +245,86 @@ namespace T
         {
             var errors = ErrorsOf("[DdsStruct] public partial struct S {\n public char X; }");
             Assert.Matches(@"File0\.cs\(\d+,\d+\): error CDDS0001: ", errors);
+        }
+
+        [Theory]
+        [InlineData("[DdsBound(0)] public string X;", "[DdsBound]")]
+        [InlineData("[DdsBound(-5)] public string X;", "[DdsBound]")]
+        [InlineData("[DdsElementBound(-1)] public List<string> X;", "[DdsElementBound]")]
+        [InlineData("[ArrayLength(0)] public int[] X;", "[ArrayLength]")]
+        [InlineData("[ArrayLength(-1)] public int[] X;", "[ArrayLength]")]
+        public void NonPositiveBoundsAndLengths_AreRejected(string member, string expected)
+        {
+            Assert.Contains(expected, ErrorsOf($"[DdsStruct] public partial struct S {{ {member} }}"));
+        }
+
+        [Theory]
+        [InlineData("public required int X;")]
+        [InlineData("public required int X { get; set; }")]
+        public void RequiredMembers_AreRejected(string member)
+        {
+            Assert.Contains("required", ErrorsOf($"[DdsStruct] public partial class S {{ {member} }}"));
+        }
+
+        [Theory]
+        [InlineData("private int _count; public int Count;", "leading underscores")]
+        [InlineData("public int __x; public int _x;", "leading underscores")]
+        [InlineData("public int _s;", "leading underscores")]
+        [InlineData("public int _;", "no valid IDL identifier")]
+        [InlineData("public int _1;", "no valid IDL identifier")]
+        public void MemberNames_AreComparedAsIdlReadsThem(string members, string expected)
+        {
+            Assert.Contains(expected, ErrorsOf($"[DdsStruct] public partial struct S {{ {members} }}"));
+        }
+
+        [Fact]
+        public void TypesDifferingOnlyInLeadingUnderscore_Collide()
+        {
+            Assert.Contains("all map to IDL name",
+                ErrorsOf("[DdsStruct] public partial struct _P { public int X; } [DdsStruct] public partial struct P { public int X; }"));
+        }
+
+        [Fact]
+        public void UnusedEnumsWithCollidingEnumerators_AreLeftOut()
+        {
+            var schema = DiscoverValid(@"
+namespace T
+{
+    public enum Color { None, Red }
+    public enum Mode { None, Auto }
+    public enum Other { Unique }
+}");
+            Assert.Equal(["Other"], schema.Enums.Select(e => e.Name));
+        }
+
+        [Fact]
+        public void UnusedEnumCollidingWithUsedOne_GivesWay()
+        {
+            var schema = DiscoverValid(@"
+using CycloneDDS.Schema;
+namespace T
+{
+    public enum Color { None, Red }
+    public enum Mode { none, Auto }
+    [DdsStruct] public partial struct S { public Color C; }
+}");
+            Assert.Equal(["Color"], schema.Enums.Select(e => e.Name));
+        }
+
+        [Theory]
+        [InlineData("public enum Color { None } public enum Mode { None } [DdsStruct] public partial struct S { public Color C; public List<Mode> M; }", "T::None")]
+        [InlineData("public enum Color { Target } [DdsStruct] public partial struct Target { public Color C; }", "T::Target")]
+        public void UsedEnumeratorCollisions_AreRejected(string declarations, string expected)
+        {
+            var schema = Discover($"using System.Collections.Generic; using CycloneDDS.Schema; namespace T {{ {declarations} }}");
+            Assert.Contains(schema.Diagnostics, d => d.Message.Contains(expected));
+        }
+
+        [Fact]
+        public void EnumsInDifferentModules_DoNotCollide()
+        {
+            var schema = DiscoverValid("namespace A { public enum Color { None } } namespace B { public enum Mode { None } }");
+            Assert.Equal(2, schema.Enums.Count);
         }
     }
 }

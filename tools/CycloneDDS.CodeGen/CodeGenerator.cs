@@ -86,7 +86,16 @@ namespace CycloneDDS.CodeGen
 
             foreach (var type in externals)
             {
-                if (idlFiles.ContainsKey(type.IdlFile) || File.Exists(Path.Combine(outputDir, $"{type.IdlFile}.idl"))) continue;
+                // The local file would overwrite the copy that declares this type
+                if (idlFiles.ContainsKey(type.IdlFile))
+                {
+                    schema.Diagnostics.Add(new SchemaDiagnostic(
+                        $"'{type.CSharpFullName}' is declared in a referenced assembly's {type.IdlFile}.idl, the name of a local IDL file too. " +
+                        "Rename the local one with [DdsIdlFile].", null));
+                    continue;
+                }
+
+                if (File.Exists(Path.Combine(outputDir, $"{type.IdlFile}.idl"))) continue;
 
                 schema.Diagnostics.Add(new SchemaDiagnostic(
                     $"'{type.CSharpFullName}' is declared in {type.IdlFile}.idl, which is not in '{outputDir}'. " +

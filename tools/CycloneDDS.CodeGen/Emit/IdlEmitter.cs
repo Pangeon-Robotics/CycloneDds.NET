@@ -71,7 +71,7 @@ namespace CycloneDDS.CodeGen.Emit
                 }
                 while (open.Count < target.Count)
                 {
-                    sb.AppendLine($"{Indent(open.Count)}module {target[open.Count]} {{");
+                    sb.AppendLine($"{Indent(open.Count)}module {Identifier(target[open.Count])} {{");
                     open.Add(target[open.Count]);
                 }
 
@@ -92,7 +92,7 @@ namespace CycloneDDS.CodeGen.Emit
             string indent = Indent(depth);
 
             sb.AppendLine($"{indent}@final");
-            sb.AppendLine($"{indent}struct {type.Name} {{");
+            sb.AppendLine($"{indent}struct {Identifier(type.Name)} {{");
             foreach (var field in type.Fields)
             {
                 var (typeSpec, suffix) = Declarator(field.Shape);
@@ -111,7 +111,7 @@ namespace CycloneDDS.CodeGen.Emit
 
             if (type.BitBound != 32)
                 sb.AppendLine($"{indent}@bit_bound({type.BitBound})");
-            sb.AppendLine($"{indent}enum {type.Name} {{");
+            sb.AppendLine($"{indent}enum {Identifier(type.Name)} {{");
             for (int i = 0; i < type.Members.Count; i++)
             {
                 var member = type.Members[i];
@@ -152,9 +152,14 @@ namespace CycloneDDS.CodeGen.Emit
         }
 
         /// <summary>Absolute scoped name, so lookup never depends on the enclosing module.</summary>
-        private static string ScopedName(NamedType type) => $"::{type.IdlName}";
+        private static string ScopedName(NamedType type) =>
+            "::" + string.Join("::", type.IdlScope.Append(type.Name).Select(Identifier));
 
-        private static string Identifier(string name) => Keywords.Contains(name) ? $"_{name}" : name;
+        private static string Identifier(string name)
+        {
+            string unescaped = IdlIdentifier.Unescaped(name);
+            return Keywords.Contains(unescaped) ? $"_{unescaped}" : unescaped;
+        }
 
         private static string Indent(int depth) => new(' ', depth * 4);
 
@@ -199,17 +204,9 @@ namespace CycloneDDS.CodeGen.Emit
             foreach (var field in structType.Fields)
             {
                 if (SchemaDiscovery.ReferencedStruct(field.Shape) is { } referencedStruct) yield return referencedStruct;
-                if (ReferencedEnum(field.Shape) is { } referencedEnum) yield return referencedEnum;
+                if (SchemaDiscovery.ReferencedEnum(field.Shape) is { } referencedEnum) yield return referencedEnum;
             }
         }
-
-        private static EnumType? ReferencedEnum(Shape shape) => shape switch
-        {
-            EnumShape e => e.Type,
-            SequenceShape { Element: EnumShape e } => e.Type,
-            ArrayShape { Element: EnumShape e } => e.Type,
-            _ => null,
-        };
 
         /// <summary>Include guards would silently drop a type caught in an include cycle, so reject cycles.</summary>
         private static void ReportIncludeCycles(DdsSchema schema, Dictionary<string, SortedSet<string>> includes)

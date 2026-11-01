@@ -110,15 +110,6 @@ namespace CycloneDDS.Runtime.Tests
             Assert.Empty(got.ListProperty);
         }
 
-        // Cyclone 0.11's normalize_wstring tests the parity of the whole payload instead of the
-        // string's byte count, so it rejects these samples
-        [Fact(Skip = "Cyclone bug: wstring validation rejects payloads of odd length")]
-        public void WideString_InOddLengthPayload_RoundTrips()
-        {
-            var sent = new WideOdd { W = "ab", B = 7 };
-            Assert.Equal(sent, RoundTrip(sent, "CdrWideOdd"));
-        }
-
         [Fact]
         public void RecordStruct_RoundTrips()
         {
@@ -194,6 +185,22 @@ namespace CycloneDDS.Runtime.Tests
             {
                 _participant.ReleaseTopic<Inner>("CdrValidation");
             }
+        }
+
+        [Fact]
+        public void NullFixedArrayOfClasses_WritesDefaultElements()
+        {
+            var got = RoundTrip(new FixedClassHolder(), "CdrNullFixedClasses");
+
+            Assert.Equal(3, got.Items.Length);
+            Assert.All(got.Items, item => Assert.Equal(7, item.Value));
+        }
+
+        [Fact]
+        public void NullSample_ThrowsArgumentNull()
+        {
+            using var writer = new DdsWriter<Holder>(_participant, "CdrNullSample");
+            Assert.Throws<ArgumentNullException>(() => writer.Write(null!));
         }
     }
 }

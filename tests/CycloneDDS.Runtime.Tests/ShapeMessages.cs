@@ -6,7 +6,7 @@ namespace CycloneDDS.Runtime.Tests.Shapes
 {
     public enum Color : byte { Red, Green, Blue = 7 }
 
-    public enum Wide { Small = 1, Large = 100_000 }
+    public enum Wide { None, Small = 1, Large = 100_000 }
 
     [InlineArray(4)]
     public struct Four<T> { private T _element; }
@@ -76,16 +76,24 @@ namespace CycloneDDS.Runtime.Tests.Shapes
     }
 
     [DdsStruct]
+    public partial class FixedClassItem
+    {
+        public int Value;
+
+        // Non-public on purpose: the default element must still be constructible from generated code
+        private FixedClassItem() { Value = 7; }
+    }
+
+    [DdsStruct]
+    public partial class FixedClassHolder
+    {
+        [ArrayLength(3)] public FixedClassItem[] Items;
+    }
+
+    [DdsStruct]
     public partial class Holder
     {
         public Leaf Child;
     }
 
-    /// <summary>A wide string in a payload of odd total length.</summary>
-    [DdsStruct]
-    public partial struct WideOdd
-    {
-        [DdsWideString] public string W;
-        public byte B;
-    }
 }

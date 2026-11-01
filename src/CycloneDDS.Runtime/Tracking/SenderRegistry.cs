@@ -68,6 +68,9 @@ namespace CycloneDDS.Runtime.Tracking
             using var scope = _identityReader.Take(100);
             for (int i = 0; i < scope.Count; i++)
             {
+                // A departing writer's auto-dispose arrives as a sample without data
+                if (scope.Infos[i].ValidData == 0) continue;
+
                 var identity = scope[i];
                 _guidToIdentity[identity.ParticipantGuid] = identity;
 

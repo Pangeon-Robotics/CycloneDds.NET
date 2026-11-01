@@ -112,14 +112,14 @@ namespace T
 namespace T
 {
     public enum Sequential { A, B, C }
-    public enum Gapped : ushort { A = 1, B = 5 }
+    public enum Gapped : ushort { D, E = 5 }
 }"));
             string idl = files.Single().Value;
 
             Assert.Contains("enum Sequential {\n        A,\n        B,\n        C\n    };".ReplaceLineEndings(), idl.ReplaceLineEndings());
             Assert.Contains("@bit_bound(16)", idl);
-            Assert.Contains("@value(1) A,", idl);
-            Assert.Contains("@value(5) B", idl);
+            Assert.Contains("@value(0) D,", idl);
+            Assert.Contains("@value(5) E", idl);
         }
 
         [Fact]

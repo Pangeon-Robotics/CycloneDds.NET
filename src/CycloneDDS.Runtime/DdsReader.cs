@@ -322,15 +322,17 @@ namespace CycloneDDS.Runtime
         {
             using var scope = Take();
             if (scope.Count == 0) return Array.Empty<T>();
+
+            // Sized for every sample taken; the filter and samples without data may leave fewer
             var batch = new T[scope.Count];
-            int i = 0;
+            int count = 0;
             foreach (var item in scope)
             {
                 if (item.IsValid)
-                    batch[i++] = item.Data;
-                else
-                    batch[i++] = default;
+                    batch[count++] = item.Data;
             }
+
+            Array.Resize(ref batch, count);
             return batch;
         }
 
