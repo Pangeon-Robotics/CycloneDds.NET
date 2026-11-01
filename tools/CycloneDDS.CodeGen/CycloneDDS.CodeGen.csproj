@@ -6,17 +6,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-    <NoWarn>CS8602</NoWarn>
   </PropertyGroup>
   
   <ItemGroup>
-    <!-- Removed CppAst dependencies - now using JSON parsing instead -->
-    <!-- <PackageReference Include="CppAst" Version="0.14.0" /> -->
-    <!-- <PackageReference Include="libclang.runtime.win-x64" Version="21.1.8" /> -->
-    <!-- <PackageReference Include="libClangSharp.runtime.win-x64" Version="21.1.8.2" /> -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
     <ProjectReference Include="..\CycloneDDS.Compiler.Common\CycloneDDS.Compiler.Common.csproj" />
     <ProjectReference Include="..\..\src\CycloneDDS.Schema\CycloneDDS.Schema.csproj" />
-    <ProjectReference Include="..\..\src\CycloneDDS.Core\CycloneDDS.Core.csproj" />
   </ItemGroup>
 </Project>

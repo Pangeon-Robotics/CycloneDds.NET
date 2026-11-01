@@ -1,6 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
-using CycloneDDS.Runtime;
+using CycloneDDS.Core;
 
 namespace CycloneDDS.Runtime.Interop
 {
@@ -13,11 +13,14 @@ namespace CycloneDDS.Runtime.Interop
         public struct DdsEntity
         {
             public int Handle;
-            public bool IsValid => Handle > 0;
+            public readonly bool IsValid => Handle > 0;
 
-            public static readonly DdsEntity Null = new DdsEntity { Handle = 0 };
+            public static readonly DdsEntity Null = new() { Handle = 0 };
 
-            public override string ToString() => $"DdsEntity(0x{Handle:x})";
+            public override readonly string ToString()
+            {
+                return $"DdsEntity(0x{Handle:x})";
+            }
         }
 
         public enum DdsReturnCode : int
@@ -54,13 +57,6 @@ namespace CycloneDDS.Runtime.Interop
             public uint GenerationRank;
             public uint AbsoluteGenerationCount;
             private uint _pad4;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        public struct ddsrt_iovec_t
-        {
-            public UIntPtr iov_len; // Was uint, must be size_t (UIntPtr)
-            public IntPtr iov_base;
         }
 
         // Listener Delegate
@@ -115,227 +111,128 @@ namespace CycloneDDS.Runtime.Interop
             IntPtr qos,
             IntPtr listener);
 
-        // Serdata APIs
-        [DllImport(DLL_NAME)]
-        public static extern IntPtr dds_get_topic_sertype(DdsEntity topic);
+        // ---- Serialized data (CDR) --------------------------------------------------
+        //
+        // Samples cross the boundary as serdata: a reference-counted CDR payload owned by
+        // Cyclone. Writers build one from bytes (Cyclone validates them against the topic's
+        // ops); readers receive references and read the bytes in place.
 
-        [DllImport(DLL_NAME, EntryPoint = "dds_serdata_from_ser_iov")]
-        public static extern IntPtr ddsi_serdata_from_ser_iov(
-            IntPtr sertype,
-            int kind, // 2 = SDK_DATA
-            uint niov,
-            [In] ddsrt_iovec_t[] iov,
-            UIntPtr size);
+        /// <summary>enum ddsi_serdata_kind</summary>
+        public enum SerdataKind
+        {
+            Empty = 0,
+            Key = 1,
+            Data = 2,
+        }
 
-        [DllImport(DLL_NAME)]
-        public static extern int dds_writecdr(
-            DdsEntity writer,
-            IntPtr serdata);
+        /// <summary>ddsrt_iovec_t on POSIX (struct iovec).</summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct IovecPosix
+        {
+            public IntPtr Base;
+            public nuint Length;
+        }
 
-        [DllImport(DLL_NAME)]
-        public static extern int dds_dispose_serdata(
-            DdsEntity writer,
-            IntPtr serdata);
-
-        [DllImport(DLL_NAME)]
-        public static extern int dds_unregister_serdata(
-            DdsEntity writer,
-            IntPtr serdata);
-
-        [DllImport(DLL_NAME)]
-        public static extern int dds_write(
-            DdsEntity writer,
-            IntPtr data);
+        /// <summary>ddsrt_iovec_t on Windows.</summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct IovecWindows
+        {
+            public uint Length;
+            public IntPtr Base;
+        }
 
         [DllImport(DLL_NAME)]
-        public static extern int dds_dispose(
-            DdsEntity writer,
-            IntPtr data);
+        public static extern int dds_get_entity_sertype(DdsEntity entity, out IntPtr sertype);
+
+        // niov is ddsrt_msg_iovlen_t: size_t on Linux, DWORD on Windows. Passing nuint is
+        // correct for both under the x64/arm64 calling conventions.
+        [DllImport(DLL_NAME, EntryPoint = "ddsi_serdata_from_ser_iov")]
+        private static extern unsafe IntPtr ddsi_serdata_from_ser_iov(IntPtr sertype, SerdataKind kind, nuint niov, void* iov, nuint size);
+
+        [DllImport(DLL_NAME, EntryPoint = "ddsi_serdata_to_ser_ref")]
+        private static extern unsafe IntPtr ddsi_serdata_to_ser_ref(IntPtr serdata, nuint offset, nuint size, void* iov);
+
+        [DllImport(DLL_NAME, EntryPoint = "ddsi_serdata_to_ser_unref")]
+        private static extern unsafe void ddsi_serdata_to_ser_unref(IntPtr serdata, void* iov);
 
         [DllImport(DLL_NAME)]
-        public static extern int dds_unregister_instance(
-            DdsEntity writer,
-            IntPtr data);
+        public static extern uint ddsi_serdata_size(IntPtr serdata);
 
+        [DllImport(DLL_NAME)]
+        public static extern void ddsi_serdata_unref(IntPtr serdata);
 
+        /// <summary>
+        /// Builds a serdata of <paramref name="sertype"/> from a complete CDR payload (header
+        /// included). Cyclone copies the bytes, so <paramref name="payload"/> may be reused at once.
+        /// </summary>
+        /// <returns>The new reference, or zero when Cyclone rejects the payload as not matching the type.</returns>
+        public static unsafe IntPtr SerdataFromCdr(IntPtr sertype, SerdataKind kind, ReadOnlySpan<byte> payload)
+        {
+            fixed (byte* data = payload)
+            {
+                if (OperatingSystem.IsWindows())
+                {
+                    var iov = new IovecWindows { Base = (IntPtr)data, Length = (uint)payload.Length };
+                    return ddsi_serdata_from_ser_iov(sertype, kind, 1, &iov, (nuint)payload.Length);
+                }
+                else
+                {
+                    var iov = new IovecPosix { Base = (IntPtr)data, Length = (nuint)payload.Length };
+                    return ddsi_serdata_from_ser_iov(sertype, kind, 1, &iov, (nuint)payload.Length);
+                }
+            }
+        }
+
+        /// <summary>Deserializes the CDR payload of <paramref name="serdata"/> in place, without copying it.</summary>
+        /// <exception cref="System.IO.InvalidDataException">The payload does not match <typeparamref name="T"/>.</exception>
+        public static unsafe T DeserializeSerdata<T>(IntPtr serdata) where T : IDdsType<T>
+        {
+            nuint size = ddsi_serdata_size(serdata);
+
+            if (OperatingSystem.IsWindows())
+            {
+                IovecWindows iov;
+                IntPtr reference = ddsi_serdata_to_ser_ref(serdata, 0, size, &iov);
+                try
+                {
+                    var reader = new CdrReader(new ReadOnlySpan<byte>((void*)iov.Base, (int)iov.Length));
+                    return T.Deserialize(ref reader);
+                }
+                finally { ddsi_serdata_to_ser_unref(reference, &iov); }
+            }
+            else
+            {
+                IovecPosix iov;
+                IntPtr reference = ddsi_serdata_to_ser_ref(serdata, 0, size, &iov);
+                try
+                {
+                    var reader = new CdrReader(new ReadOnlySpan<byte>((void*)iov.Base, (int)iov.Length));
+                    return T.Deserialize(ref reader);
+                }
+                finally { ddsi_serdata_to_ser_unref(reference, &iov); }
+            }
+        }
+
+        /// <summary>Writes a serdata; consumes the caller's reference whatever the outcome.</summary>
+        [DllImport(DLL_NAME)]
+        public static extern int dds_writecdr(DdsEntity writer, IntPtr serdata);
+
+        // On success each buf[i] holds a serdata reference the caller must unref
         [DllImport(DLL_NAME)]
         public static extern int dds_readcdr(
-            int reader, // Changed from DdsEntity to int
-            [In, Out] IntPtr[] samples,
+            DdsEntity reader_or_condition,
+            [In, Out] IntPtr[] buf,
             uint maxs,
             [In, Out] DdsSampleInfo[] infos,
             uint mask);
 
         [DllImport(DLL_NAME)]
         public static extern int dds_takecdr(
-            int reader, // Changed from DdsEntity to int
-            [In, Out] IntPtr[] samples,
+            DdsEntity reader_or_condition,
+            [In, Out] IntPtr[] buf,
             uint maxs,
             [In, Out] DdsSampleInfo[] infos,
             uint mask);
-
-        [DllImport(DLL_NAME)]
-        public static extern long dds_lookup_instance_serdata(int entity, IntPtr serdata);
-
-        [DllImport(DLL_NAME)]
-        public static extern long dds_lookup_instance(int reader, IntPtr key);
-
-        [DllImport(DLL_NAME)]
-        public static extern int dds_takecdr_instance(
-            int reader,
-            [In, Out] IntPtr[] samples,
-            uint maxs,
-            [In, Out] DdsSampleInfo[] infos,
-            long handle,
-            uint mask);
-
-        [DllImport(DLL_NAME)]
-        public static extern int dds_readcdr_instance(
-            int reader,
-            [In, Out] IntPtr[] samples,
-            uint maxs,
-            [In, Out] DdsSampleInfo[] infos,
-            long handle,
-            uint mask);
-
-        [DllImport(DLL_NAME, EntryPoint = "dds_takecdr")]
-        public static extern int dds_takecdr_raw(
-            int reader,
-            IntPtr samples,
-            uint maxs,
-            IntPtr infos,
-            uint mask);
-
-        [DllImport(DLL_NAME, EntryPoint = "dds_takecdr")]
-        public static extern unsafe int dds_takecdr_ptr(
-            int reader, // Changed from DdsEntity to int
-            IntPtr* samples,
-            uint maxs,
-            DdsSampleInfo* infos,
-            uint mask);
-
-        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        public delegate int DdsReadWithCollectorDelegate(
-            IntPtr arg,
-            IntPtr sampleInfo, // const dds_sample_info_t *
-            IntPtr sertype,    // const struct ddsi_sertype *
-            IntPtr serdata);   // struct ddsi_serdata *
-
-        [DllImport(DLL_NAME)]
-        public static extern int dds_take_with_collector(
-            int reader,
-            uint maxs,
-            long handle, // dds_instance_handle_t
-            uint mask,
-            DdsReadWithCollectorDelegate collect_sample,
-            IntPtr collect_sample_arg);
-
-        [DllImport(DLL_NAME, EntryPoint = "dds_sample_info_size")]
-        public static extern uint dds_sample_info_size();
-
-        [DllImport(DLL_NAME, EntryPoint = "dds_serdata_ref")]
-        public static extern IntPtr ddsi_serdata_ref(IntPtr serdata);
-
-        [DllImport(DLL_NAME, EntryPoint = "dds_serdata_unref")]
-        public static extern void ddsi_serdata_unref(IntPtr serdata);
-
-        [DllImport(DLL_NAME, EntryPoint = "dds_serdata_size")]
-        public static extern uint ddsi_serdata_size(IntPtr serdata);
-
-        [DllImport(DLL_NAME, EntryPoint = "dds_serdata_to_ser")]
-        public static extern void ddsi_serdata_to_ser(IntPtr serdata, UIntPtr off, UIntPtr sz, IntPtr buf);
-
-        // Opaque struct for type safety in unsafe code
-        public struct struct_ddsi_serdata { }
-
-        // Helper to match user expectation
-        public static IntPtr dds_create_serdata_from_cdr(DdsEntity topic, IntPtr data, uint size)
-        {
-            return dds_create_serdata_from_cdr(topic, data, size, 2); // Default to SDK_DATA
-        }
-
-        public static IntPtr dds_create_serdata_from_cdr(DdsEntity topic, IntPtr data, uint size, int kind)
-        {
-            IntPtr sertype = dds_get_topic_sertype(topic);
-            if (sertype == IntPtr.Zero) return IntPtr.Zero;
-
-            var iov = new ddsrt_iovec_t
-            {
-                iov_base = data,
-                iov_len = (UIntPtr)size
-            };
-
-            return ddsi_serdata_from_ser_iov(sertype, kind, 1, new[] { iov }, (UIntPtr)size);
-        }
-
-        [DllImport(DLL_NAME)]
-        public static extern void dds_free(IntPtr ptr);
-
-        [DllImport(DLL_NAME)]
-        public static extern int dds_write(
-            int writer, // DdsEntity.Handle
-            IntPtr data);
-
-        [DllImport(DLL_NAME)]
-        public static extern int dds_read(
-            int reader,
-            [In, Out] IntPtr[] samples,
-            [In, Out] DdsSampleInfo[] infos,
-            UIntPtr bufsz,
-            uint maxs);
-
-        [DllImport(DLL_NAME)]
-        public static extern int dds_take(
-            int reader, // Changed to int to match others
-            [In, Out] IntPtr[] samples,
-            [In, Out] DdsSampleInfo[] infos,
-            UIntPtr bufsz,
-            uint maxs);
-
-        [DllImport(DLL_NAME)]
-        public static extern int dds_read_mask(
-            int reader,
-            [In, Out] IntPtr[] samples,
-            [In, Out] DdsSampleInfo[] infos,
-            UIntPtr bufsz,
-            uint maxs,
-            uint mask);
-
-        // dds_lookup_instance already defined above
-
-        [DllImport(DLL_NAME)]
-        public static extern int dds_read_instance(
-            int reader,
-            [In, Out] IntPtr[] samples,
-            [In, Out] DdsSampleInfo[] infos,
-            UIntPtr bufsz,
-            uint maxs,
-            long handle);
-
-        [DllImport(DLL_NAME)]
-        public static extern int dds_take_instance(
-            int reader,
-            [In, Out] IntPtr[] samples,
-            [In, Out] DdsSampleInfo[] infos,
-            UIntPtr bufsz,
-            uint maxs,
-            long handle);
-
-        [DllImport(DLL_NAME)]
-        public static extern int dds_take_mask(
-            int reader,
-            [In, Out] IntPtr[] samples,
-            [In, Out] DdsSampleInfo[] infos,
-            UIntPtr bufsz,
-            uint maxs,
-            uint mask);
-
-        // Return loan
-        [DllImport(DLL_NAME)]
-        public static extern int dds_return_loan(
-            int reader,
-            [In, Out] IntPtr[] samples,
-            int count);
 
         [DllImport(DLL_NAME)]
         public static extern int dds_assert_liveliness(int entity);
@@ -664,7 +561,7 @@ namespace CycloneDDS.Runtime.Interop
     /// Used for O(1) participant/writer correlation.
     /// </summary>
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    [CycloneDDS.Schema.DdsStruct]
+    [Schema.DdsStruct]
     public partial struct DdsGuid : IEquatable<DdsGuid>
     {
         /// <summary>
@@ -677,14 +574,17 @@ namespace CycloneDDS.Runtime.Interop
         /// </summary>
         public long Low;
 
-        public bool Equals(DdsGuid other) => High == other.High && Low == other.Low;
+        public readonly bool Equals(DdsGuid other)
+        {
+            return High == other.High && Low == other.Low;
+        }
 
         // Helper to convert Native DdsGuid -> System.Guid
-        public unsafe System.Guid ToManaged()
+        public unsafe Guid ToManaged()
         {
             fixed (void* ptr = &this)
             {
-                return new System.Guid(new ReadOnlySpan<byte>(ptr, 16));
+                return new Guid(new ReadOnlySpan<byte>(ptr, 16));
             }
         }
 
@@ -703,9 +603,20 @@ namespace CycloneDDS.Runtime.Interop
         {
             return ddsGuid.ToManaged();
         }
-        public override bool Equals(object? obj) => obj is DdsGuid other && Equals(other);
-        public override int GetHashCode() => HashCode.Combine(High, Low);
-        public override string ToString() => $"{High:X16}{Low:X16}";
+        public override bool Equals(object? obj)
+        {
+            return obj is DdsGuid other && Equals(other);
+        }
+
+        public override readonly int GetHashCode()
+        {
+            return HashCode.Combine(High, Low);
+        }
+
+        public override readonly string ToString()
+        {
+            return $"{High:X16}{Low:X16}";
+        }
 
         public static bool operator ==(DdsGuid left, DdsGuid right) => left.Equals(right);
         public static bool operator !=(DdsGuid left, DdsGuid right) => !left.Equals(right);

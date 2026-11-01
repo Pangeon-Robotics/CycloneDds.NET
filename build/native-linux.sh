@@ -18,7 +18,9 @@ set -euo pipefail
 CONFIG="${1:-Release}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-SOURCE_DIR="$REPO_ROOT/cyclonedds"
+# native/ wraps the unmodified Cyclone DDS submodule (cyclonedds/) plus our idljson plugin.
+SOURCE_DIR="$REPO_ROOT/native"
+CYCLONEDDS_DIR="$REPO_ROOT/cyclonedds"
 BUILD_DIR="$REPO_ROOT/build/native-linux"
 INSTALL_DIR="$REPO_ROOT/artifacts/native-install-linux"
 ARTIFACTS_DIR="$REPO_ROOT/artifacts/native/linux-x64"
@@ -40,8 +42,14 @@ if ! command -v gcc &> /dev/null && ! command -v cc &> /dev/null; then
     exit 1
 fi
 
-if [ ! -d "$SOURCE_DIR" ] || [ -z "$(ls -A "$SOURCE_DIR" 2>/dev/null)" ]; then
-    echo "ERROR: Native source directory is missing or empty: $SOURCE_DIR" >&2
+if ! [ -f /usr/include/openssl/ssl.h ] && ! pkg-config --exists openssl 2>/dev/null; then
+    echo "ERROR: OpenSSL development files not found (needed for the DDS Security plugins)." >&2
+    echo "       Run: sudo apt-get install -y libssl-dev" >&2
+    exit 1
+fi
+
+if [ ! -d "$CYCLONEDDS_DIR" ] || [ -z "$(ls -A "$CYCLONEDDS_DIR" 2>/dev/null)" ]; then
+    echo "ERROR: Cyclone DDS source directory is missing or empty: $CYCLONEDDS_DIR" >&2
     echo "       Run: git submodule update --init --recursive" >&2
     exit 1
 fi
@@ -60,9 +68,14 @@ cmake -S "$SOURCE_DIR" -B "$BUILD_DIR" \
     -DBUILD_IDLC=ON \
     -DBUILD_TESTING=OFF \
     -DBUILD_EXAMPLES=OFF \
-    -DENABLE_SSL=ON \
     -DENABLE_SHM=OFF \
-    -DENABLE_SECURITY=ON
+    -DENABLE_SECURITY=ON \
+    -DENABLE_SSL=ON \
+    -DENABLE_TCP_TLS=OFF
+# DDS Security: the plugins (libdds_security_*.so) link OpenSSL, but with
+# ENABLE_TCP_TLS=OFF libddsc itself does not, so applications that never configure
+# <Security> have no OpenSSL dependency at all. Building needs the OpenSSL headers
+# (libssl-dev); at runtime the plugins use the distribution's libcrypto.so.3.
 
 # ----------------------------------------------------------------
 # [2/3] Build & Install
@@ -87,7 +100,8 @@ BIN_DIR="$INSTALL_DIR/bin"
 
 # Copy a shared library, resolving the SONAME symlink chain to the real file so
 # we don't have to hard-code the version suffix. The file is staged as both
-# <base>.so (linker/convention name) and <base>.so.0 (the runtime SONAME).
+# <base>.so (linker/convention name) and under its SONAME (e.g. <base>.so.0 or
+# <base>.so.11), which is the name dependent binaries (idlc) load at runtime.
 copy_lib() {
     local base="$1"
     local real=""
@@ -105,9 +119,13 @@ copy_lib() {
         return 1
     fi
 
+    local soname
+    soname="$(readelf -d "$real" 2>/dev/null | sed -n 's/.*(SONAME).*\[\(.*\)\].*/\1/p')"
+    [ -n "$soname" ] || soname="${base}.so.0"
+
     cp -f "$real" "$ARTIFACTS_DIR/${base}.so"
-    cp -f "$real" "$ARTIFACTS_DIR/${base}.so.0"
-    echo "  [+] ${base}.so / ${base}.so.0"
+    cp -f "$real" "$ARTIFACTS_DIR/${soname}"
+    echo "  [+] ${base}.so / ${soname}"
 }
 
 # Runtime library and IDL-compiler support libraries.
@@ -116,13 +134,9 @@ copy_lib libcycloneddsidl
 copy_lib libcycloneddsidlc
 copy_lib libcycloneddsidljson
 
-# DDS Security plugins (ENABLE_SECURITY=ON). Unlike the libraries above these are
-# unversioned, and ddsc dlopen()s them by bare soname ("libdds_security_auth.so")
-# when a <Security> section is present in the domain configuration. glibc resolves
-# a dlopen from within libddsc.so against libddsc.so's own DT_RUNPATH, which the
-# RPATH fix below sets to $ORIGIN - so staging them flat next to libddsc.so here is
-# what makes them findable at runtime. Without them every secure participant fails
-# with "Could not load authentication library".
+# DDS Security plugins. libddsc dlopen()s them by bare name only when the domain
+# configuration has a <Security> section; dlopen resolves that through libddsc's
+# RUNPATH, which is set to $ORIGIN below, so they are staged flat next to it.
 for plugin in libdds_security_auth libdds_security_ac libdds_security_crypto; do
     if [ -f "$LIB_DIR/${plugin}.so" ]; then
         cp -f "$LIB_DIR/${plugin}.so" "$ARTIFACTS_DIR/${plugin}.so"

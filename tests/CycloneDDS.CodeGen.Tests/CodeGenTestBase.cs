@@ -1,105 +1,121 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Reflection;
-using System.Runtime.Loader;
-using System.Collections.Generic;
+using CycloneDDS.CodeGen.Discovery;
+using CycloneDDS.CodeGen.Model;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
-using CycloneDDS.CodeGen;
-using CycloneDDS.Core; using CycloneDDS.Runtime; using System.Runtime.CompilerServices;
-using System.Buffers;
 
 namespace CycloneDDS.CodeGen.Tests
 {
-    public class CodeGenTestBase
+    /// <summary>
+    /// Helpers to run discovery on in-memory sources, and to build throwaway projects on disk
+    /// through the full generator (idlc included) and compile them.
+    /// </summary>
+    public abstract class CodeGenTestBase : IDisposable
     {
-        protected Assembly CompileToAssembly(string assemblyName, params string[] sources)
+        protected readonly string TempDir = Path.Combine(Path.GetTempPath(), "cdds-codegen-" + Guid.NewGuid().ToString("N"));
+
+        protected CodeGenTestBase()
         {
-            var trees = sources.Select(s => CSharpSyntaxTree.ParseText(s)).ToArray();
-            
-            // Gather references
-            var references = new List<MetadataReference>
-            {
-                MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
-                MetadataReference.CreateFromFile(typeof(Console).Assembly.Location),
-                MetadataReference.CreateFromFile(typeof(System.Runtime.AssemblyTargetedPatchBandAttribute).Assembly.Location),
-                MetadataReference.CreateFromFile(typeof(CycloneDDS.Core.NativeArena).Assembly.Location),
-                MetadataReference.CreateFromFile(typeof(CycloneDDS.Runtime.DdsParticipant).Assembly.Location),
-                MetadataReference.CreateFromFile(typeof(CycloneDDS.Schema.BoundedSeq<>).Assembly.Location),
-                MetadataReference.CreateFromFile(typeof(IBufferWriter<>).Assembly.Location), // System.Memory
-                MetadataReference.CreateFromFile(Assembly.Load("System.Runtime").Location),
-                MetadataReference.CreateFromFile(Assembly.Load("System.Collections").Location),
-                MetadataReference.CreateFromFile(typeof(System.Collections.Generic.List<>).Assembly.Location),
-                MetadataReference.CreateFromFile(typeof(System.Linq.Enumerable).Assembly.Location),
-                MetadataReference.CreateFromFile(Assembly.Load("netstandard").Location)
-            };
+            Directory.CreateDirectory(TempDir);
+        }
 
-            var compilation = CSharpCompilation.Create(assemblyName)
+        public void Dispose()
+        {
+            try { Directory.Delete(TempDir, true); } catch { }
+        }
+
+
+        // ---- In-memory discovery ---------------------------------------------------
+
+        /// <summary>Framework, Schema, Core and Runtime: everything generated code compiles against.</summary>
+        protected static List<MetadataReference> StandardReferences()
+        {
+            var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
+                .Split(Path.PathSeparator)
+                .Select(p => (MetadataReference)MetadataReference.CreateFromFile(p))
+                .ToList();
+
+            references.Add(MetadataReference.CreateFromFile(typeof(CycloneDDS.Schema.DdsStructAttribute).Assembly.Location));
+            references.Add(MetadataReference.CreateFromFile(typeof(CycloneDDS.Core.CdrWriter).Assembly.Location));
+            references.Add(MetadataReference.CreateFromFile(typeof(CycloneDDS.Runtime.DdsParticipant).Assembly.Location));
+            return references;
+        }
+
+        /// <summary>Discovers the schema of <paramref name="sources"/>, each its own file named <c>File{index}.cs</c>.</summary>
+        protected static DdsSchema Discover(params string[] sources)
+        {
+            var trees = sources.Select((s, i) => CSharpSyntaxTree.ParseText(s, path: $"File{i}.cs"));
+            var compilation = CSharpCompilation.Create("DiscoveryTest")
                 .WithOptions(new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true))
-                .AddReferences(references)
+                .AddReferences(StandardReferences())
                 .AddSyntaxTrees(trees);
+            return SchemaDiscovery.Discover(compilation);
+        }
 
-            using var ms = new MemoryStream();
-            var result = compilation.Emit(ms);
+        /// <summary>Discovers a valid schema, failing with its diagnostics otherwise.</summary>
+        protected static DdsSchema DiscoverValid(params string[] sources)
+        {
+            var schema = Discover(sources);
+            if (schema.HasErrors) throw new Xunit.Sdk.XunitException(string.Join(Environment.NewLine, schema.Diagnostics));
+            return schema;
+        }
 
-            if (!result.Success)
+
+        // ---- Projects on disk ------------------------------------------------------
+
+        protected string CreateProject(string name, params (string File, string Content)[] files)
+        {
+            string folder = Path.Combine(TempDir, name);
+            Directory.CreateDirectory(folder);
+            foreach (var (file, content) in files)
+                File.WriteAllText(Path.Combine(folder, file), content);
+            return folder;
+        }
+
+        protected static string GeneratedDir(string projectFolder) => Path.Combine(projectFolder, "Generated");
+
+        /// <summary>
+        /// Runs the generator on <paramref name="sourceDir"/> as the MSBuild targets would (IDL of
+        /// referenced projects copied in first), then compiles sources plus generated code.
+        /// </summary>
+        /// <returns>Path of the compiled assembly.</returns>
+        protected string CompileProject(string projectName, string sourceDir, IEnumerable<string>? references = null)
+        {
+            var referenceList = references?.ToList() ?? [];
+            string outputDir = GeneratedDir(sourceDir);
+            Directory.CreateDirectory(outputDir);
+
+            // CopyReferencedIdlFiles: each referenced assembly sits next to its project folder
+            foreach (var dll in referenceList)
             {
-                var failures = result.Diagnostics.Where(diagnostic => 
-                    diagnostic.IsWarningAsError || diagnostic.Severity == DiagnosticSeverity.Error);
-                
-                var errorMsg = string.Join("\n", failures.Select(d => $"{d.Id}: {d.GetMessage()} at {d.Location}"));
-                throw new Exception($"Compilation failed:\n{errorMsg}\n\nCode:\n{string.Join("\n\n---\n\n", sources)}");
+                string referencedGenerated = GeneratedDir(Path.Combine(Path.GetDirectoryName(dll)!, Path.GetFileNameWithoutExtension(dll)));
+                foreach (var idl in Directory.GetFiles(referencedGenerated, "*.idl"))
+                    File.Copy(idl, Path.Combine(outputDir, Path.GetFileName(idl)), overwrite: true);
             }
 
-            ms.Seek(0, SeekOrigin.Begin);
-            return AssemblyLoadContext.Default.LoadFromStream(ms);
-        }
+            new CodeGenerator().Generate(sourceDir, outputDir, referenceList.Prepend(typeof(CycloneDDS.Schema.DdsStructAttribute).Assembly.Location));
 
-        protected string ToHex(byte[] data)
-        {
-            return BitConverter.ToString(data).Replace("-", " ");
-        }
+            var trees = Directory.GetFiles(sourceDir, "*.cs", SearchOption.AllDirectories)
+                .Select(f => CSharpSyntaxTree.ParseText(File.ReadAllText(f), path: f));
 
-        protected string BytesToHex(ReadOnlyMemory<byte> data)
-        {
-             return BitConverter.ToString(data.ToArray()).Replace("-", " "); // Space separation
-        }
+            var compilation = CSharpCompilation.Create(projectName)
+                .WithOptions(new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true))
+                .AddReferences(StandardReferences())
+                .AddReferences(referenceList.Select(r => MetadataReference.CreateFromFile(r)))
+                .AddSyntaxTrees(trees);
 
-        protected object Instantiate(Assembly assembly, string typeName)
-        {
-            var type = assembly.GetType(typeName);
-            if (type == null) throw new Exception($"Type {typeName} not found in assembly.");
-            return Activator.CreateInstance(type);
-        }
+            string dllPath = Path.Combine(TempDir, projectName + ".dll");
+            var result = compilation.Emit(dllPath);
+            if (!result.Success)
+            {
+                var errors = result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error);
+                throw new Xunit.Sdk.XunitException($"Compilation of {projectName} failed:{Environment.NewLine}{string.Join(Environment.NewLine, errors)}");
+            }
 
-        protected void SetField(object instance, string fieldName, object value)
-        {
-            var type = instance.GetType();
-            var field = type.GetField(fieldName);
-            if (field == null) throw new Exception($"Field {fieldName} not found on type {type.Name}.");
-            field.SetValue(instance, value);
+            return dllPath;
         }
-
-        protected object GetField(object instance, string fieldName)
-        {
-            var type = instance.GetType();
-            var field = type.GetField(fieldName);
-            if (field == null) throw new Exception($"Field {fieldName} not found on type {type.Name}.");
-            return field.GetValue(instance);
-        }
-        
-        protected string ExtractBody(string code)
-        {
-            // Extract content inside namespace { ... }
-            int start = code.IndexOf("namespace");
-            if (start == -1) return code;
-            start = code.IndexOf("{", start) + 1;
-            int end = code.LastIndexOf("}");
-            return code.Substring(start, end - start);
-        }
-
-
     }
 }
-

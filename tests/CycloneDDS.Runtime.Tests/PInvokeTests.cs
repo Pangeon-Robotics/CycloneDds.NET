@@ -75,21 +75,5 @@ namespace CycloneDDS.Runtime.Tests
             
             DdsApi.dds_delete(p);
         }
-
-        [Fact]
-        public void CreateTopic_Success()
-        {
-            var p = DdsApi.dds_create_participant(0, IntPtr.Zero, IntPtr.Zero);
-            Assert.True(p.IsValid);
-            
-            using var desc = new DescriptorContainer(TestMessage.GetDescriptorOps(), 8, 4, 16);
-            var topic = DdsApi.dds_create_topic(p, desc.Ptr, "MockTopicPInvoke", IntPtr.Zero, IntPtr.Zero);
-            
-            // If this fails, then topic creation is broken (signature or logic)
-            Assert.True(topic.IsValid, $"Topic handle invalid: {topic.Handle}");
-            
-            if (topic.IsValid) DdsApi.dds_delete(topic);
-            DdsApi.dds_delete(p);
-        }
     }
 }

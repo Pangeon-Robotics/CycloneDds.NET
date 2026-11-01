@@ -129,5 +129,32 @@ namespace CycloneDDS.Runtime.Tests
                  Assert.Equal(3, c);
              }
         }
+
+        [Fact]
+        public async System.Threading.Tasks.Task StreamAsync_YieldsOnlySamplesPassingTheFilter()
+        {
+             using var reader = new DdsReader<TestMessage>(_participant, _topicName, DdsQos.KeepAll);
+             using var writer = new DdsWriter<TestMessage>(_participant, _topicName, DdsQos.KeepAll);
+
+             reader.SetFilter(v => v.Value > 3);
+             writer.Write(new TestMessage { Id = 1, Value = 1 });
+             writer.Write(new TestMessage { Id = 2, Value = 5 });
+             writer.Write(new TestMessage { Id = 3, Value = 10 });
+             Thread.Sleep(500);
+
+             using var cts = new CancellationTokenSource(5000);
+             var ids = new System.Collections.Generic.List<int>();
+             try
+             {
+                 await foreach (var msg in reader.StreamAsync(cts.Token))
+                 {
+                     ids.Add(msg.Id);
+                     if (ids.Count == 2) cts.CancelAfter(300); // Any stray default sample arrives within the same batch
+                 }
+             }
+             catch (OperationCanceledException) { }
+
+             Assert.Equal([2, 3], ids);
+        }
     }
 }

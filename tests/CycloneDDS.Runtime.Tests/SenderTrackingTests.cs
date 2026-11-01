@@ -9,8 +9,6 @@ using CycloneDDS.Runtime.Tracking;
 using CycloneDDS.Runtime.Interop;
 using CycloneDDS.Schema;
 
-using CycloneDDS.Runtime.Memory; // Add using
-
 using DdsGuid = CycloneDDS.Runtime.Interop.DdsGuid;
 
 namespace CycloneDDS.Runtime.Tests
@@ -19,9 +17,7 @@ namespace CycloneDDS.Runtime.Tests
     [DdsStruct]
     public partial struct SenderTrackingTestMsg
     {
-        [DdsId(0), DdsKey]
         public int Id;
-        [DdsId(1)]
         public int Value;
     }
 
@@ -173,7 +169,8 @@ namespace CycloneDDS.Runtime.Tests
              
              using var pReceiver = new DdsParticipant();
              pReceiver.EnableSenderTracking(new SenderIdentityConfig { AppInstanceId = 99 });
-             using var reader = new DdsReader<SenderTrackingTestMsg>(pReceiver, TEST_TOPIC);
+             // Keyless topic: keep both writers' samples rather than only the latest
+             using var reader = new DdsReader<SenderTrackingTestMsg>(pReceiver, TEST_TOPIC, DdsQos.KeepAll);
              reader.EnableSenderTracking(pReceiver.SenderRegistry!);
              
              Thread.Sleep(2000); // Discovery can take time
@@ -215,6 +212,45 @@ namespace CycloneDDS.Runtime.Tests
              // If this fails it might be timing/discovery issue in test environment
              Assert.True(saw10, "Did not identify sender 10");
              Assert.True(saw20, "Did not identify sender 20");
+        }
+
+        [Fact]
+        public void DepartedParticipant_DoesNotStopIdentityMonitoring()
+        {
+             using var receiver = new DdsParticipant();
+             receiver.EnableSenderTracking(new SenderIdentityConfig { AppInstanceId = 99 });
+             // Keyless topic: keep both writers' samples rather than only the latest
+             using var reader = new DdsReader<SenderTrackingTestMsg>(receiver, TEST_TOPIC + "Departed", DdsQos.KeepAll);
+             reader.EnableSenderTracking(receiver.SenderRegistry!);
+
+             // Its identity writer leaving delivers a sample without data to the registry
+             using (var departing = new DdsParticipant())
+             {
+                 departing.EnableSenderTracking(new SenderIdentityConfig { AppInstanceId = 10 });
+                 using var writer = new DdsWriter<SenderTrackingTestMsg>(departing, TEST_TOPIC + "Departed");
+                 Thread.Sleep(1000);
+             }
+             Thread.Sleep(1000);
+
+             using var later = new DdsParticipant();
+             later.EnableSenderTracking(new SenderIdentityConfig { AppInstanceId = 20 });
+             using var laterWriter = new DdsWriter<SenderTrackingTestMsg>(later, TEST_TOPIC + "Departed");
+             Thread.Sleep(1000);
+             laterWriter.Write(new SenderTrackingTestMsg { Id = 20 });
+
+             SenderIdentity? sender = null;
+             for (int i = 0; i < 25 && sender == null; i++)
+             {
+                 Thread.Sleep(200);
+                 using var scope = reader.Read(10);
+                 for (int k = 0; k < scope.Count; k++)
+                 {
+                     if (scope.Infos[k].ValidData != 0 && scope.GetSender(k) is { } found) sender = found;
+                 }
+             }
+
+             Assert.NotNull(sender);
+             Assert.Equal(20, sender.Value.AppInstanceId);
         }
     }
 }

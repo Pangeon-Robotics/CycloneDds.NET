@@ -22,7 +22,8 @@ Write-Host "============================================================" -Foreg
 
 # Paths
 $RepoRoot = $PSScriptRoot | Split-Path -Parent
-$SourceDir = Join-Path $RepoRoot "cyclonedds"
+# native/ wraps the unmodified Cyclone DDS submodule (cyclonedds/) plus our idljson plugin.
+$SourceDir = Join-Path $RepoRoot "native"
 $BuildDir = Join-Path $RepoRoot "build/native"
 $InstallDir = Join-Path $RepoRoot "artifacts/native-install" # Intermediate install dir
 $ArtifactsDir = Join-Path $RepoRoot "artifacts/native/win-x64"
@@ -39,18 +40,15 @@ if (!(Get-Command cmake -ErrorAction SilentlyContinue)) {
 }
 
 # ===================================================================================
-# Locate OpenSSL (required: ENABLE_SSL=ON / ENABLE_SECURITY=ON below).
+# Locate OpenSSL - needed to BUILD the DDS Security plugins (ENABLE_SECURITY=ON).
 #
-# The GitHub windows-latest image ships OpenSSL 3.x preinstalled under
-# "C:\Program Files\OpenSSL", which is what CMake's FindOpenSSL was already
-# picking up. We resolve it here and pass -DOPENSSL_ROOT_DIR explicitly so that a
-# missing or relocated install fails HERE, with an actionable message, instead of
-# surfacing as an obscure compile error several minutes into the build.
+# OpenSSL is only a build-time dependency here: with ENABLE_TCP_TLS=OFF ddsc.dll does
+# not import it, and the OpenSSL DLLs are deliberately NOT shipped. Applications that
+# configure <Security> provide their own OpenSSL 3 at runtime (see README).
 #
-# Do NOT reintroduce a "vcpkg install openssl" step to satisfy this. Without a
-# vcpkg toolchain file CMake never looks inside the vcpkg tree, so that step built
-# OpenSSL from source for ~6 minutes every CI run and then had its output ignored
-# in favour of the preinstalled copy.
+# The GitHub windows-latest image ships OpenSSL 3.x under "C:\Program Files\OpenSSL".
+# Passing -DOPENSSL_ROOT_DIR explicitly makes a missing install fail here, with an
+# actionable message, rather than deep inside the build.
 # ===================================================================================
 $opensslCandidates = @()
 if ($env:OPENSSL_ROOT_DIR) { $opensslCandidates += $env:OPENSSL_ROOT_DIR }
@@ -70,15 +68,13 @@ foreach ($candidate in $opensslCandidates) {
 
 if (-not $OpenSslRoot) {
     throw @"
-OpenSSL was not found, but this build requires it (ENABLE_SSL=ON, ENABLE_SECURITY=ON).
+OpenSSL development files were not found; they are needed to build the DDS Security plugins.
 
 Searched:
   $($opensslCandidates -join "`n  ")
 
-Install the OpenSSL 3.x development files with one of:
-  winget install ShiningLight.OpenSSL.Prod
-  choco install openssl
-...or point OPENSSL_ROOT_DIR at an existing installation.
+Install OpenSSL 3.x with headers and libraries (e.g. the full "Win64 OpenSSL v3"
+installer from https://slproweb.com/products/Win32OpenSSL.html), or point OPENSSL_ROOT_DIR at an existing installation.
 "@
 }
 
@@ -108,9 +104,11 @@ try {
         "-DBUILD_IDLC=ON",
         "-DBUILD_TESTING=OFF",
         "-DBUILD_EXAMPLES=OFF",
-        "-DENABLE_SSL=ON",
         "-DENABLE_SHM=OFF",
+        # DDS Security plugins on; TCP+TLS off so ddsc.dll itself does not import OpenSSL.
         "-DENABLE_SECURITY=ON",
+        "-DENABLE_SSL=ON",
+        "-DENABLE_TCP_TLS=OFF",
         # Forward slashes: CMake treats backslashes in -D values as escapes.
         "-DOPENSSL_ROOT_DIR=$($OpenSslRoot -replace '\\', '/')"
     )
@@ -176,15 +174,7 @@ $RequiredFiles = @(
     "idlc.exe",
     "cycloneddsidl.dll",
     "cycloneddsidlc.dll",
-    "cycloneddsidljson.dll",
-
-    # DDS Security plugins (ENABLE_SECURITY=ON). ddsc dlopen()s these by bare
-    # name when a <Security> section is present in the domain configuration, so
-    # they have to ship with the package - without them every secure participant
-    # fails with "Could not load authentication library".
-    "dds_security_auth.dll",
-    "dds_security_ac.dll",
-    "dds_security_crypto.dll"
+    "cycloneddsidljson.dll"
 )
 
 # Copy required files from bin/
@@ -198,28 +188,14 @@ foreach ($file in $RequiredFiles) {
     }
 }
 
-# ===================================================================================
-# OpenSSL runtime DLLs.
-#
-# ENABLE_SSL=ON links OpenSSL into ddsc ITSELF (TCP+TLS), not merely into the
-# security plugins, so ddsc.dll carries hard import-table entries for
-# libcrypto-3-x64.dll / libssl-3-x64.dll and will not LOAD at all without them.
-# Windows ships no system OpenSSL, so the package has to carry these.
-#
-# Globbed rather than hard-coded: the "-3" infix tracks the OpenSSL major version
-# and would change on an eventual OpenSSL 4.
-# ===================================================================================
-$OpenSslBin = Join-Path $OpenSslRoot "bin"
-
-foreach ($pattern in @("libcrypto-*.dll", "libssl-*.dll")) {
-    $found = @(Get-ChildItem -Path $OpenSslBin -Filter $pattern -File -ErrorAction SilentlyContinue)
-    if ($found.Count -eq 0) {
-        throw "No file matching '$pattern' in $OpenSslBin. ddsc.dll imports the OpenSSL runtime DLLs and cannot load without them."
-    }
-    foreach ($dll in $found) {
-        Copy-Item -Path $dll.FullName -Destination $ArtifactsDir -Force
-        Write-Host "  [+] Copied $($dll.Name) (OpenSSL runtime)" -ForegroundColor Green
-    }
+# DDS Security plugins. ddsc.dll loads these by bare name (LoadLibrary) only when the
+# domain configuration has a <Security> section. They import OpenSSL (libcrypto-3-x64.dll),
+# which is NOT shipped: the application provides it (see README).
+foreach ($file in @("dds_security_auth.dll", "dds_security_ac.dll", "dds_security_crypto.dll")) {
+    $src = Join-Path $BinDir $file
+    if (-not (Test-Path $src)) { throw "Missing DDS Security plugin $file in $BinDir." }
+    Copy-Item -Path $src -Destination $ArtifactsDir -Force
+    Write-Host "  [+] Copied $file" -ForegroundColor Green
 }
 
 # Can we locate VC++ runtime?
