@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using CycloneDDS.Core;
 using CycloneDDS.Runtime.Interop;
 using CycloneDDS.Runtime.Tracking;
 
@@ -90,8 +91,8 @@ namespace CycloneDDS.Runtime
                     // Anything left here is still held by an endpoint the caller never disposed
                     foreach (var entry in _topics.Values)
                     {
-                        DdsApi.dds_delete(entry.Entity);
-                        entry.Resource.Dispose();
+                        _ = DdsApi.dds_delete(entry.Entity);
+                        entry.Descriptor.Dispose();
                     }
                     _topics.Clear();
                 }
@@ -107,7 +108,7 @@ namespace CycloneDDS.Runtime
         /// a (topic name, type) pair and shared by every later registration of that pair; each
         /// call must be balanced by a <see cref="ReleaseTopic{T}"/>. Thread-safe.
         /// </summary>
-        internal DdsApi.DdsEntity RegisterTopic<T>(string topicName)
+        internal DdsApi.DdsEntity RegisterTopic<T>(string topicName) where T : IDdsType<T>
         {
             lock (_topicLock)
             {
@@ -120,31 +121,25 @@ namespace CycloneDDS.Runtime
                     return existing.Entity;
                 }
 
-                // 1. Get descriptor ops from static method (via reflection)
-                uint[] ops = DdsTypeSupport.GetDescriptorOps<T>();
-                DdsKeyDescriptor[] keys = DdsTypeSupport.GetKeyDescriptors<T>();
+                var descriptor = new NativeTopicDescriptor(T.Descriptor);
 
-                // 2. Marshal descriptor to native
-                IntPtr descriptorPtr = MarshalDescriptor<T>(ops, keys, DdsTypeSupport.GetTypeName<T>(), out TopicResource resource);
-
-                // 3. Create native topic. The QoS is deliberately left NULL: a QoS stored on the
-                // ktopic makes every later endpoint with a different QoS fail with
-                // DDS_RETCODE_INCONSISTENT_POLICY.
+                // The QoS is deliberately left NULL: a QoS stored on the ktopic makes every later
+                // endpoint with a different QoS fail with DDS_RETCODE_INCONSISTENT_POLICY.
                 DdsApi.DdsEntity topic = DdsApi.dds_create_topic(
                     NativeEntity,
-                    descriptorPtr,
+                    descriptor.Pointer,
                     topicName,
                     IntPtr.Zero,
                     IntPtr.Zero);
 
                 if (!topic.IsValid)
                 {
-                    resource.Dispose();
-                    throw new DdsException(DdsApi.DdsReturnCode.Error,
-                        $"Failed to create topic '{topicName}' for type '{DdsTypeSupport.GetTypeName<T>()}'");
+                    descriptor.Dispose();
+                    throw new DdsException((DdsApi.DdsReturnCode)topic.Handle,
+                        $"Failed to create topic '{topicName}' for type '{T.Descriptor.TypeName}'");
                 }
 
-                _topics.Add(key, new TopicEntry(topic, resource));
+                _topics.Add(key, new TopicEntry(topic, descriptor));
                 return topic;
             }
         }
@@ -165,285 +160,83 @@ namespace CycloneDDS.Runtime
 
                 if (--entry.RefCount > 0) return;
 
-                _topics.Remove(key);
-                DdsApi.dds_delete(entry.Entity);
-                entry.Resource.Dispose();
+                _ = _topics.Remove(key);
+                _ = DdsApi.dds_delete(entry.Entity);
+                entry.Descriptor.Dispose();
             }
         }
 
-        private sealed class TopicEntry
+        private sealed class TopicEntry(DdsApi.DdsEntity entity, NativeTopicDescriptor descriptor)
         {
-            public TopicEntry(DdsApi.DdsEntity entity, TopicResource resource)
-            {
-                Entity = entity;
-                Resource = resource;
-            }
-
-            public DdsApi.DdsEntity Entity { get; }
-            public TopicResource Resource { get; }
+            public DdsApi.DdsEntity Entity { get; } = entity;
+            public NativeTopicDescriptor Descriptor { get; } = descriptor;
             public int RefCount { get; set; } = 1;
         }
 
-        [StructLayout(LayoutKind.Sequential)]
-        private struct DdsTopicDescriptor
+        /// <summary>
+        /// Unmanaged copy of a <see cref="DdsTypeDescriptor"/> as dds_topic_descriptor_t. Cyclone
+        /// keeps pointers into it, so it must outlive the topic.
+        /// </summary>
+        private sealed class NativeTopicDescriptor : IDisposable
         {
-            public uint m_size;
-            public uint m_align;
-            public uint m_flagset;
-            public uint m_nkeys;
-            public IntPtr m_typename; // char*
-            public IntPtr m_keys;     // dds_key_descriptor_t*
-            public uint m_nops;
-            public IntPtr m_ops;      // uint32_t*
-            public IntPtr m_meta;     // char*
-            public DdsTypeMetaSer type_information;
-            public DdsTypeMetaSer type_mapping;
-            public uint restrict_data_representation;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct DdsTypeMetaSer
-        {
-            public IntPtr data;
-            public uint sz;
-        }
-
-        private class TopicResource : IDisposable
-        {
-            private IntPtr _descPtr;
-            private IntPtr _typeNamePtr;
-            private GCHandle _opsHandle;
-            private IntPtr _keysPtr;
-            private IntPtr[] _keyNamePtrs;
-
-            public TopicResource(IntPtr descPtr, IntPtr typeNamePtr, GCHandle opsHandle, IntPtr keysPtr, IntPtr[] keyNamePtrs)
+            [StructLayout(LayoutKind.Sequential)]
+            private struct dds_topic_descriptor_t
             {
-                _descPtr = descPtr;
-                _typeNamePtr = typeNamePtr;
-                _opsHandle = opsHandle;
-                _keysPtr = keysPtr;
-                _keyNamePtrs = keyNamePtrs;
+                public uint m_size;
+                public uint m_align;
+                public uint m_flagset;
+                public uint m_nkeys;
+                public IntPtr m_typename;
+                public IntPtr m_keys;
+                public uint m_nops;
+                public IntPtr m_ops;
+                public IntPtr m_meta;
+                public dds_type_meta_ser type_information;
+                public dds_type_meta_ser type_mapping;
+                public uint restrict_data_representation;
+            }
+
+            [StructLayout(LayoutKind.Sequential)]
+            private struct dds_type_meta_ser
+            {
+                public IntPtr data;
+                public uint sz;
+            }
+
+            private IntPtr _typeName;
+            private IntPtr _ops;
+
+            public IntPtr Pointer { get; private set; }
+
+            public unsafe NativeTopicDescriptor(DdsTypeDescriptor descriptor)
+            {
+                _typeName = Marshal.StringToHGlobalAnsi(descriptor.TypeName);
+
+                _ops = Marshal.AllocHGlobal(descriptor.Ops.Length * sizeof(uint));
+                descriptor.Ops.CopyTo(new Span<uint>((void*)_ops, descriptor.Ops.Length));
+
+                // No keys (ROS 2 topics are keyless) and no type information: matching is by type name
+                var native = new dds_topic_descriptor_t
+                {
+                    m_size = descriptor.Size,
+                    m_align = descriptor.Align,
+                    m_flagset = descriptor.Flagset,
+                    m_typename = _typeName,
+                    m_nops = (uint)descriptor.Ops.Length,
+                    m_ops = _ops,
+                };
+
+                Pointer = Marshal.AllocHGlobal(sizeof(dds_topic_descriptor_t));
+                *(dds_topic_descriptor_t*)Pointer = native;
             }
 
             public void Dispose()
             {
-                if (_descPtr != IntPtr.Zero)
-                {
-                    Marshal.FreeHGlobal(_descPtr);
-                    _descPtr = IntPtr.Zero;
-                }
-                if (_typeNamePtr != IntPtr.Zero)
-                {
-                    Marshal.FreeHGlobal(_typeNamePtr);
-                    _typeNamePtr = IntPtr.Zero;
-                }
-                if (_opsHandle.IsAllocated)
-                {
-                    _opsHandle.Free();
-                }
-                if (_keysPtr != IntPtr.Zero)
-                {
-                    Marshal.FreeHGlobal(_keysPtr);
-                    _keysPtr = IntPtr.Zero;
-                }
-                if (_keyNamePtrs != null)
-                {
-                    foreach (var ptr in _keyNamePtrs)
-                    {
-                        if (ptr != IntPtr.Zero) Marshal.FreeHGlobal(ptr);
-                    }
-                }
+                Marshal.FreeHGlobal(Pointer);
+                Marshal.FreeHGlobal(_ops);
+                Marshal.FreeHGlobal(_typeName);
+                Pointer = _ops = _typeName = IntPtr.Zero;
             }
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct DdsKeyDescriptorNative
-        {
-            public IntPtr Name;
-            public uint Offset;
-            public uint Index;
-        }
-
-        private static int GetRecursiveOffset(Type type, string keyPath)
-        {
-            try
-            {
-                string[] parts = keyPath.Split('.');
-                int totalOffset = 0;
-                Type currentType = type;
-
-                foreach (var part in parts)
-                {
-                    // Find the field in the current type
-                    var field = currentType.GetField(part,
-                        System.Reflection.BindingFlags.Instance |
-                        System.Reflection.BindingFlags.Public |
-                        System.Reflection.BindingFlags.NonPublic |
-                        System.Reflection.BindingFlags.IgnoreCase);
-
-                    if (field == null)
-                    {
-                        // Try backing field for property? <Name>k__BackingField
-                        field = currentType.GetField($"<{part}>k__BackingField",
-                           System.Reflection.BindingFlags.Instance |
-                           System.Reflection.BindingFlags.NonPublic |
-                           System.Reflection.BindingFlags.IgnoreCase);
-                    }
-
-                    if (field == null)
-                    {
-                        throw new InvalidOperationException($"Could not find field '{part}' in type '{currentType.Name}' while resolving key '{keyPath}'");
-                    }
-
-                    // Add the offset of this field within its parent
-                    // Note: Marshal.OffsetOf requires exact case match of the field definition
-                    totalOffset += Marshal.OffsetOf(currentType, field.Name).ToInt32();
-
-                    // Drill down
-                    currentType = field.FieldType;
-                }
-
-                return totalOffset;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error calculating recursive offset for {keyPath} in {type.Name}: {ex}");
-                throw;
-            }
-        }
-
-        private static uint GetAlignment(Type type)
-        {
-            // Try to get generated alignment first
-            try
-            {
-                var alignMethod = type.GetMethod("GetDescriptorAlign", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                if (alignMethod != null)
-                {
-                    return (uint)alignMethod.Invoke(null, null)!;
-                }
-            }
-            catch { }
-
-            if (type.StructLayoutAttribute != null && type.StructLayoutAttribute.Pack != 0)
-                return (uint)type.StructLayoutAttribute.Pack;
-
-            return (uint)IntPtr.Size; // Default to machine word size (8 on x64)
-        }
-
-        private static IntPtr MarshalDescriptor<T>(uint[] ops, DdsKeyDescriptor[] keys, string typeName, out TopicResource resource)
-        {
-            // Marshal type name
-            IntPtr typeNamePtr = Marshal.StringToHGlobalAnsi(typeName);
-
-            // Pin ops array
-            GCHandle opsHandle = GCHandle.Alloc(ops, GCHandleType.Pinned);
-
-            // Handle keys
-            IntPtr keysPtr = IntPtr.Zero;
-            uint nkeys = 0;
-            IntPtr[] keyNamePtrs = null!;
-
-            // if (false) // Diagnostic: Disable keys to check for crash
-            if (keys != null && keys.Length > 0)
-            {
-                int nativeKeySize = Marshal.SizeOf<DdsKeyDescriptorNative>();
-                keysPtr = Marshal.AllocHGlobal(nativeKeySize * keys.Length);
-
-                keyNamePtrs = new IntPtr[keys.Length];
-
-                for (int i = 0; i < keys.Length; i++)
-                {
-                    var nativeKey = new DdsKeyDescriptorNative();
-                    nativeKey.Name = Marshal.StringToHGlobalAnsi(keys[i].Name);
-                    keyNamePtrs[i] = nativeKey.Name;
-                    nativeKey.Index = keys[i].Index;
-
-                    if (keys[i].Offset == 0)
-                    {
-                        // Use recursive/smart offset calculation for all keys (handles dot notation and case mismatch)
-                        nativeKey.Offset = (uint)GetRecursiveOffset(typeof(T), keys[i].Name);
-                    }
-                    else
-                    {
-                        nativeKey.Offset = keys[i].Offset;
-                    }
-
-                    IntPtr itemPtr = IntPtr.Add(keysPtr, i * nativeKeySize);
-                    Marshal.StructureToPtr(nativeKey, itemPtr, false);
-                }
-
-                nkeys = (uint)keys.Length;
-            }
-
-            // Create descriptor struct
-            uint flagset = 0;
-            uint sampleSize = 0;
-            uint align = 0;
-
-            try
-            {
-                var flagsMethod = typeof(T).GetMethod("GetDescriptorFlagset", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                if (flagsMethod != null) flagset = (uint)flagsMethod.Invoke(null, null)!;
-
-                var sizeMethod = typeof(T).GetMethod("GetDescriptorSize", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                if (sizeMethod != null) sampleSize = (uint)sizeMethod.Invoke(null, null)!;
-
-                var alignMethod = typeof(T).GetMethod("GetDescriptorAlign", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                if (alignMethod != null) align = (uint)alignMethod.Invoke(null, null)!;
-            }
-            catch { }
-
-            // Fallback for Size if not generated (for backward compat)
-            if (sampleSize == 0)
-            {
-                try
-                {
-                    // WARNING: This is dangerous for types with arrays/strings!
-                    // Prefer 0 (let middleware guess) or a safe large default if strict size unknown?
-                    // CycloneDDS treats 0 as "unknown/let me handle it" for some types, 
-                    // but for @final types it might need it.
-                    // Using Marshal.SizeOf is better than nothing for simple structs, 
-                    // but terrible for arrays. 
-                    // Ideally, we always regenerate code.
-                    sampleSize = (uint)Marshal.SizeOf<T>();
-                }
-                catch
-                {
-                    sampleSize = 4096; // Fallback to avoid 0 size error
-                }
-            }
-
-            // Fallback for Align
-            if (align == 0)
-            {
-                align = GetAlignment(typeof(T));
-            }
-
-            var desc = new DdsTopicDescriptor
-            {
-                m_size = sampleSize,
-                m_align = align,
-                m_flagset = flagset,
-                m_nkeys = nkeys,
-                m_typename = typeNamePtr,
-                m_keys = keysPtr,
-                m_nops = (uint)ops.Length,
-                m_ops = opsHandle.AddrOfPinnedObject(),
-                m_meta = IntPtr.Zero,
-                type_information = new DdsTypeMetaSer { data = IntPtr.Zero, sz = 0 },
-                type_mapping = new DdsTypeMetaSer { data = IntPtr.Zero, sz = 0 },
-                restrict_data_representation = 0
-            };
-
-            // Alloc descriptor memory
-            IntPtr descPtr = Marshal.AllocHGlobal(Marshal.SizeOf<DdsTopicDescriptor>());
-            Marshal.StructureToPtr(desc, descPtr, false);
-
-            // Hand the resources back so they live and die with the topic entity
-            resource = new TopicResource(descPtr, typeNamePtr, opsHandle, keysPtr, keyNamePtrs);
-
-            return descPtr;
         }
 
 
@@ -516,7 +309,7 @@ namespace CycloneDDS.Runtime
             var process = System.Diagnostics.Process.GetCurrentProcess();
 
             // Get native participant GUID
-            DdsApi.dds_get_guid(NativeEntity.Handle, out var myGuid);
+            _ = DdsApi.dds_get_guid(NativeEntity.Handle, out var myGuid);
 
             var identity = new SenderIdentity
             {

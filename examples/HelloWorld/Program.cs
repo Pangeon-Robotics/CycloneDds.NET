@@ -9,9 +9,7 @@ namespace HelloWorld
     [DdsStruct]
     public partial struct HelloWorldMessage
     {
-        [DdsKey]
         public int Id;
-        [DdsManaged]
         public string Message;
     }
 

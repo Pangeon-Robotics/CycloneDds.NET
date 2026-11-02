@@ -1,5 +1,3 @@
-using System;
-
 namespace CycloneDDS.Runtime.Tracking
 {
     /// <summary>
