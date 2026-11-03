@@ -145,7 +145,7 @@ namespace LibA {
     [DdsIdlFile(""PointFile"")]
     [DdsStruct]
     public partial struct Point { public int X; }
-    public enum Kind { One, Two }
+    [DdsEnum] public enum Kind { One, Two }
 }"));
             string dllA = CompileProject("TransitiveA", folderA);
 
@@ -251,14 +251,32 @@ namespace CaseB { [CycloneDDS.Schema.DdsStruct] public partial struct Bar { publ
         }
 
         [Fact]
-        public void UnusedEnumeratorNamedLikeModule_PassesIdlc()
+        public void UnmarkedEnums_AreLeftOutOfIdl()
         {
+            // Unrepresentable in IDL, and its enumerator would collide with the module
             var folder = CreateProject("EnumModule", ("Types.cs", @"
 using CycloneDDS.Schema;
-namespace App { public enum Mode { Sim } }
+namespace App { public enum Mode : byte { Sim, Invalid = byte.MaxValue } }
 namespace App.Sim { [DdsStruct] public partial struct S { public int X; } }"));
 
             CompileProject("EnumModule", folder);
+
+            Assert.DoesNotContain("enum", File.ReadAllText(Path.Combine(GeneratedDir(folder), "Types.idl")));
+        }
+
+        [Fact]
+        public void UnsignedEnumAboveSignedRange_PassesIdlc()
+        {
+            var folder = CreateProject("UnsignedEnum", ("Types.cs", @"
+using CycloneDDS.Schema;
+namespace App {
+    [DdsEnum] public enum State : byte { Idle, Invalid = byte.MaxValue }
+    [DdsStruct] public partial struct S { public State X; }
+}"));
+
+            CompileProject("UnsignedEnum", folder);
+
+            Assert.Contains("@value(-1) Invalid", File.ReadAllText(Path.Combine(GeneratedDir(folder), "Types.idl")));
         }
 
         [Fact]
@@ -279,7 +297,7 @@ namespace App.sim { [DdsStruct] public partial struct B { public int X; } }"));
             var folderA = CreateProject("KeywordA", ("Types.cs", @"
 using CycloneDDS.Schema;
 namespace KeywordA.@class {
-    public enum @enum { @default, @checked }
+    [DdsEnum] public enum @enum { @default, @checked }
     [DdsStruct] public partial struct @struct { public int @event; public @enum @params { get; set; } public int[] @lock; }
 }"));
             string dllA = CompileProject("KeywordA", folderA);
@@ -302,7 +320,7 @@ namespace KeywordB {
             var folder = CreateProject("Keywords", ("Types.cs", @"
 using CycloneDDS.Schema;
 namespace Company.Public.Module {
-    public enum Enum { Case, _Default }
+    [DdsEnum] public enum Enum { Case, _Default }
     [DdsStruct] public partial struct Map { public int _value; public Enum Struct; }
     [DdsStruct] public partial struct _Under { public Map Sequence; private int __hidden; }
 }"));

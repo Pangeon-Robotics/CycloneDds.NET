@@ -83,6 +83,18 @@ namespace CycloneDDS.CodeGen.Model
 
         /// <summary>IDL <c>@bit_bound</c>: the underlying type's width in bits.</summary>
         public int BitBound => Underlying.Size() * 8;
+
+        /// <summary>
+        /// A member's value as IDL declares it. IDL enumerators are signed within the bit bound, and
+        /// IDL has no unsigned enum, so an unsigned value above that range is declared as the signed
+        /// value with the same bits. The wire image is unchanged; other IDL consumers read it as signed.
+        /// </summary>
+        public long IdlValue(EnumMember member) => unchecked(BitBound switch
+        {
+            8 => (sbyte)member.Value,
+            16 => (short)member.Value,
+            _ => (int)member.Value,
+        });
     }
 
     public sealed record EnumMember(string Name, long Value);

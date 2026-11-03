@@ -47,7 +47,7 @@ namespace CycloneDDS.Runtime.Tests
                 Nested = new Inner { Id = 42, Label = "inner" },
                 IntList = [1, 2, 3], DoubleSequence = [0.5], BoundedShorts = [-1, 2, 3], Bools = [true, false, true],
                 Strings = ["a", "", "c"], BoundedStrings = ["abcd", "x"], WideStrings = ["ü", "\U0001F600"],
-                Structs = [new Inner { Id = 1, Label = "one" }, new Inner { Id = 2, Label = "" }], Colors = [Color.Green, Color.Red],
+                Structs = [new Inner { Id = 1, Label = "one" }, new Inner { Id = 2, Label = "" }], Colors = [Color.Green, Color.Red, Color.Invalid],
                 FixedFloats = [1f, 2f, 3f], FixedStructs = [new Inner { Id = 7, Label = "seven" }, new Inner { Id = 8, Label = "eight" }],
                 Property = 99, ListProperty = [long.MaxValue],
             };

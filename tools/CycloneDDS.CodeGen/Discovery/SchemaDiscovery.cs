@@ -13,6 +13,7 @@ namespace CycloneDDS.CodeGen.Discovery
     public sealed class SchemaDiscovery
     {
         private const string DdsStructAttribute = "CycloneDDS.Schema.DdsStructAttribute";
+        private const string DdsEnumAttribute = "CycloneDDS.Schema.DdsEnumAttribute";
         private const string DdsIdlFileAttribute = "CycloneDDS.Schema.DdsIdlFileAttribute";
         private const string DdsIdlModuleAttribute = "CycloneDDS.Schema.DdsIdlModuleAttribute";
         private const string DdsIdlMappingAttribute = "CycloneDDS.Schema.DdsIdlMappingAttribute";
@@ -35,9 +36,6 @@ namespace CycloneDDS.CodeGen.Discovery
         // Every type a member can reference, local or external, keyed by symbol
         private readonly Dictionary<INamedTypeSymbol, StructType> _structs = new(SymbolEqualityComparer.Default);
         private readonly Dictionary<INamedTypeSymbol, EnumType> _enums = new(SymbolEqualityComparer.Default);
-
-        // Local enums that cannot be DDS enums, with the reason; an error only once referenced
-        private readonly Dictionary<INamedTypeSymbol, string> _unrepresentableEnums = new(SymbolEqualityComparer.Default);
 
         private SchemaDiscovery(Compilation compilation)
         {
@@ -103,7 +101,7 @@ namespace CycloneDDS.CodeGen.Discovery
             // Declare first so members may reference types declared later
             foreach (var symbol in sourceTypes)
             {
-                if (symbol.TypeKind == TypeKind.Enum && symbol.ContainingType == null)
+                if (symbol.TypeKind == TypeKind.Enum && HasAttribute(symbol, DdsEnumAttribute))
                     DeclareEnum(symbol);
                 else if (HasAttribute(symbol, DdsStructAttribute))
                     DeclareStruct(symbol);
@@ -199,10 +197,17 @@ namespace CycloneDDS.CodeGen.Discovery
 
         private void DeclareEnum(INamedTypeSymbol symbol)
         {
-            PrimitiveKind? underlying = EnumUnderlying(symbol);
-            if (underlying == null)
+            Location location = symbol.Locations[0];
+
+            if (symbol.ContainingType != null)
             {
-                _unrepresentableEnums[symbol] = "its underlying type is 64-bit; IDL enums are at most 32-bit";
+                Error($"[DdsEnum] enum '{symbol.Name}' is nested in '{symbol.ContainingType.Name}'; DDS enums must be declared directly in a namespace.", location);
+                return;
+            }
+
+            if (EnumUnderlying(symbol) is not { } underlying)
+            {
+                Error($"[DdsEnum] enum '{symbol.Name}' has a 64-bit underlying type; IDL enums are at most 32-bit.", location);
                 return;
             }
 
@@ -219,13 +224,13 @@ namespace CycloneDDS.CodeGen.Discovery
                 // C# zero-initializes enums, and Cyclone rejects a value the enum does not declare
                 members.All(m => m.Value != 0) ? "it has no member with value 0, so an unset member could not be written" :
                 members.Select(m => m.Value).Distinct().Count() != members.Count ? "two members share a value" :
-                UnrepresentableIdentifier(symbol.Name, idlModule) is { } identifier ? $"'{identifier}' has no valid IDL identifier" :
-                members.FirstOrDefault(m => !IdlIdentifier.IsRepresentable(m.Name)) is { } member ? $"'{member.Name}' has no valid IDL identifier" :
+                UnrepresentableIdentifier(symbol.Name, idlModule) is { } identifier ? $"'{identifier}' has no valid IDL identifier: {IdentifierRule}" :
+                members.FirstOrDefault(m => !IdlIdentifier.IsRepresentable(m.Name)) is { } member ? $"'{member.Name}' has no valid IDL identifier: {IdentifierRule}" :
                 null;
 
             if (problem != null)
             {
-                _unrepresentableEnums[symbol] = problem;
+                Error($"[DdsEnum] enum '{symbol.Name}' cannot be a DDS enum: {problem}.", location);
                 return;
             }
 
@@ -235,7 +240,7 @@ namespace CycloneDDS.CodeGen.Discovery
                 Namespace = NamespaceOf(symbol),
                 IdlModule = idlModule,
                 IdlFile = IdlFileOf(symbol),
-                Underlying = underlying.Value,
+                Underlying = underlying,
             };
             enumType.Members.AddRange(members);
 
@@ -526,15 +531,11 @@ namespace CycloneDDS.CodeGen.Discovery
         {
             if (_enums.TryGetValue(symbol, out var known)) return known;
 
-            if (_unrepresentableEnums.TryGetValue(symbol, out var reason))
-            {
-                Error($"'{name}' uses enum '{symbol.Name}', which cannot be a DDS enum: {reason}.", location);
-                return null;
-            }
-
+            // A local [DdsEnum] missing from the map failed its own declaration checks
             if (symbol.Locations.Any(l => l.IsInSource))
             {
-                Error($"'{name}' uses enum '{symbol.Name}', which is nested in a type; DDS enums must be declared directly in a namespace.", location);
+                if (!HasAttribute(symbol, DdsEnumAttribute))
+                    Error($"'{name}' uses enum '{symbol.Name}', which is not marked [DdsEnum].", location);
                 return null;
             }
 
@@ -582,7 +583,7 @@ namespace CycloneDDS.CodeGen.Discovery
 
             Error($"'{name}' uses '{fullName}' from assembly '{symbol.ContainingAssembly.Name}', which has no [assembly: DdsIdlMapping] " +
                   "for it. That assembly was built without CycloneDDS code generation (check for a stale generated folder), " +
-                  "the type is not a DDS type, or it is an enum that assembly left out of its IDL as unusable.", location);
+                  "or the type is not marked [DdsStruct] or [DdsEnum].", location);
             return null;
         }
 
@@ -624,40 +625,16 @@ namespace CycloneDDS.CodeGen.Discovery
             }
         }
 
-        /// <summary>
-        /// IDL declares types, enumerators and modules in one case-insensitive scope. A declaration
-        /// only unused enums need gives way, so unrelated enums in an application project cannot
-        /// break its build; a collision the local types depend on is an error.
-        /// </summary>
+        /// <summary>IDL declares types, enumerators and modules in one case-insensitive scope.</summary>
         private void CheckIdlNameCollisions()
         {
-            var referenced = _schema.Structs
-                .SelectMany(s => s.Fields)
-                .Select(f => ReferencedEnum(f.Shape))
-                .OfType<EnumType>()
-                .ToHashSet();
-
-            bool GivesWay(IdlDeclaration d) => d.Owners.All(o => o is EnumType e && !referenced.Contains(e));
-
             var collisions = IdlDeclarations()
                 .GroupBy(d => d.ScopedName, StringComparer.OrdinalIgnoreCase)
-                .Where(g => g.Count() > 1 && g.Any(d => !d.IsModule)) // idlc accepts modules differing only in case
-                .ToList();
-
-            var unused = collisions
-                .SelectMany(g => g)
-                .Where(GivesWay)
-                .SelectMany(d => d.Owners)
-                .OfType<EnumType>()
-                .ToHashSet();
-            _schema.Enums.RemoveAll(unused.Contains);
+                .Where(g => g.Count() > 1 && g.Any(d => !d.IsModule)); // idlc accepts modules differing only in case
 
             foreach (var group in collisions)
             {
-                var kept = group.Where(d => !GivesWay(d)).ToList();
-                if (kept.Count < 2 || kept.All(d => d.IsModule)) continue;
-
-                var owners = kept.SelectMany(d => d.Owners).Where(o => o is not EnumType e || !unused.Contains(e)).Distinct();
+                var owners = group.SelectMany(d => d.Owners).Distinct();
                 Error($"{string.Join(", ", owners.Select(o => $"'{o.CSharpFullName}'"))} all map to IDL name '{group.Key}'. IDL names are " +
                       "case-insensitive, and enumerators and modules share their enclosing scope with types. Rename one or give it a different [DdsIdlModule].", null);
             }

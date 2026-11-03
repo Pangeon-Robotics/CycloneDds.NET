@@ -71,7 +71,7 @@ using System.Runtime.CompilerServices;
 using CycloneDDS.Schema;
 namespace T
 {
-    public enum E { A, B }
+    [DdsEnum] public enum E { A, B }
     [InlineArray(4)] public struct Four { private int _e; }
     [DdsStruct] public partial struct S
     {
@@ -109,10 +109,11 @@ namespace T
         public void Enums_BitBoundAndValues()
         {
             var files = IdlEmitter.Emit(DiscoverValid(@"
+using CycloneDDS.Schema;
 namespace T
 {
-    public enum Sequential { A, B, C }
-    public enum Gapped : ushort { D, E = 5 }
+    [DdsEnum] public enum Sequential { A, B, C }
+    [DdsEnum] public enum Gapped : ushort { D, E = 5 }
 }"));
             string idl = files.Single().Value;
 
@@ -120,6 +121,24 @@ namespace T
             Assert.Contains("@bit_bound(16)", idl);
             Assert.Contains("@value(0) D,", idl);
             Assert.Contains("@value(5) E", idl);
+        }
+
+        [Fact]
+        public void UnsignedEnumValuesAboveSignedRange_KeepTheirBits()
+        {
+            string idl = IdlEmitter.Emit(DiscoverValid(@"
+using CycloneDDS.Schema;
+namespace T
+{
+    [DdsEnum] public enum U8 : byte { A8, Mid8 = 128, Max8 = byte.MaxValue }
+    [DdsEnum] public enum U16 : ushort { A16, Max16 = ushort.MaxValue }
+    [DdsEnum] public enum U32 : uint { A32, Max32 = uint.MaxValue }
+}")).Single().Value;
+
+            Assert.Contains("@value(-128) Mid8,", idl);
+            Assert.Contains("@value(-1) Max8", idl);
+            Assert.Contains("@value(-1) Max16", idl);
+            Assert.Contains("@value(-1) Max32", idl);
         }
 
         [Fact]
