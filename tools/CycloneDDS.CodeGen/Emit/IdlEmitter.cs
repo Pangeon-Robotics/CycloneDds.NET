@@ -107,7 +107,7 @@ namespace CycloneDDS.CodeGen.Emit
             string indent = Indent(depth);
 
             // Implicit values only when they are exactly 0..n-1 in declaration order
-            bool explicitValues = type.Members.Select((m, i) => m.Value != i).Any(differs => differs);
+            bool explicitValues = type.Members.Select((m, i) => type.IdlValue(m) != i).Any(differs => differs);
 
             if (type.BitBound != 32)
                 sb.AppendLine($"{indent}@bit_bound({type.BitBound})");
@@ -115,7 +115,7 @@ namespace CycloneDDS.CodeGen.Emit
             for (int i = 0; i < type.Members.Count; i++)
             {
                 var member = type.Members[i];
-                string value = explicitValues ? $"@value({member.Value}) " : "";
+                string value = explicitValues ? $"@value({type.IdlValue(member)}) " : "";
                 string comma = i < type.Members.Count - 1 ? "," : "";
                 sb.AppendLine($"{indent}    {value}{Identifier(member.Name)}{comma}");
             }

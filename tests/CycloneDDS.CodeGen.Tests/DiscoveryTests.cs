@@ -14,7 +14,7 @@ using System.Runtime.CompilerServices;
 using CycloneDDS.Schema;
 namespace T
 {{
-    public enum Small : byte {{ A, B }}
+    [DdsEnum] public enum Small : byte {{ A, B }}
     [InlineArray(3)] public struct Three {{ private float _e; }}
     [DdsStruct] public partial struct Other {{ public int X; }}
     [DdsStruct] public partial struct S
@@ -120,16 +120,17 @@ namespace A.B
         }
 
         [Fact]
-        public void Enums_TopLevelRepresentableOnly_AreDiscovered()
+        public void Enums_MarkedOnly_AreDiscovered()
         {
+            // Unmarked enums are ignored however unrepresentable or colliding they are
             var schema = DiscoverValid(@"
+using CycloneDDS.Schema;
 namespace T
 {
-    public enum Plain { A, B }
-    public enum Negative { A = -1 }
+    [DdsEnum] public enum Plain { A, B }
+    public enum Unmarked { A, B }
+    public enum Invalid { A = -1, B = -1 }
     public enum Big : long { A }
-    public enum Aliased { A = 0, B = 0 }
-    public enum NoZero { C = 1 }
     public static class Holder { public enum Nested { A } }
 }");
             Assert.Equal(["Plain"], schema.Enums.Select(e => e.Name));
@@ -198,27 +199,31 @@ namespace T
                 ErrorsOf("[DdsStruct] public partial struct S { public Three X { get; set; } }", "[InlineArray(3)] public struct Three { private int _e; }"));
         }
 
-        [Fact]
-        public void ReferencedUnrepresentableEnum_IsRejected_WithReason()
+        [Theory]
+        [InlineData("[DdsEnum] public enum E { A = -1 }", "negative values")]
+        [InlineData("[DdsEnum] public enum E { A = 1, B = 2 }", "value 0")]
+        [InlineData("[DdsEnum] public enum E { A = 0, B = 0 }", "share a value")]
+        [InlineData("[DdsEnum] public enum E { }", "no members")]
+        [InlineData("[DdsEnum] public enum E : long { A }", "64-bit")]
+        [InlineData("public static class Holder { [DdsEnum] public enum E { A } }", "nested")]
+        public void InvalidEnum_IsRejected_AtItsDeclaration(string declaration, string expected)
         {
-            var errors = ErrorsOf("[DdsStruct] public partial struct S { public Negative X; }", "public enum Negative { A = -1 }");
-            Assert.Contains("Negative", errors);
-            Assert.Contains("negative values", errors);
+            var schema = Discover($"using CycloneDDS.Schema; namespace T {{ {declaration} }}");
+            Assert.Contains(schema.Diagnostics, d => d.Message.Contains("'E'") && d.Message.Contains(expected) && d.Location != null);
         }
 
         [Fact]
-        public void ReferencedEnumWithoutZeroMember_IsRejected()
+        public void UnmarkedEnum_UsedByStruct_IsRejected()
         {
-            var errors = ErrorsOf("[DdsStruct] public partial struct S { public NoZero X; }", "public enum NoZero { A = 1, B = 2 }");
-            Assert.Contains("NoZero", errors);
-            Assert.Contains("value 0", errors);
+            Assert.Contains("not marked [DdsEnum]",
+                ErrorsOf("[DdsStruct] public partial struct S { public E X; }", "public enum E { A }"));
         }
 
         [Fact]
-        public void NestedEnum_IsRejected()
+        public void InvalidEnum_UsedByStruct_IsReportedOnce()
         {
-            Assert.Contains("nested in a type",
-                ErrorsOf("[DdsStruct] public partial struct S { public Holder.E X; }", "public static class Holder { public enum E { A } }"));
+            var schema = Discover("using CycloneDDS.Schema; namespace T { [DdsEnum] public enum E { A = 1 } [DdsStruct] public partial struct S { public int Y; public E X; } }");
+            Assert.Single(schema.Diagnostics);
         }
 
         [Fact]
@@ -284,72 +289,29 @@ namespace T
                 ErrorsOf("[DdsStruct] public partial struct _P { public int X; } [DdsStruct] public partial struct P { public int X; }"));
         }
 
-        [Fact]
-        public void UnusedEnumsWithCollidingEnumerators_AreLeftOut()
-        {
-            var schema = DiscoverValid(@"
-namespace T
-{
-    public enum Color { None, Red }
-    public enum Mode { None, Auto }
-    public enum Other { Unique }
-}");
-            Assert.Equal(["Other"], schema.Enums.Select(e => e.Name));
-        }
-
-        [Fact]
-        public void UnusedEnumCollidingWithUsedOne_GivesWay()
-        {
-            var schema = DiscoverValid(@"
-using CycloneDDS.Schema;
-namespace T
-{
-    public enum Color { None, Red }
-    public enum Mode { none, Auto }
-    [DdsStruct] public partial struct S { public Color C; }
-}");
-            Assert.Equal(["Color"], schema.Enums.Select(e => e.Name));
-        }
-
         [Theory]
-        [InlineData("public enum Color { None } public enum Mode { None } [DdsStruct] public partial struct S { public Color C; public List<Mode> M; }", "T::None")]
-        [InlineData("public enum Color { Target } [DdsStruct] public partial struct Target { public Color C; }", "T::Target")]
-        public void UsedEnumeratorCollisions_AreRejected(string declarations, string expected)
+        [InlineData("[DdsEnum] public enum Color { None } [DdsEnum] public enum Mode { None }", "T::None")]
+        [InlineData("[DdsEnum] public enum Color { None, Red } [DdsEnum] public enum Mode { none, Auto }", "T::None")]
+        [InlineData("[DdsEnum] public enum Color { Target } [DdsStruct] public partial struct Target { public int X; }", "T::Target")]
+        public void EnumeratorCollisions_AreRejected(string declarations, string expected)
         {
             var schema = Discover($"using System.Collections.Generic; using CycloneDDS.Schema; namespace T {{ {declarations} }}");
             Assert.Contains(schema.Diagnostics, d => d.Message.Contains(expected));
         }
 
         [Fact]
-        public void UnusedEnumeratorNamedLikeModule_GivesWay()
+        public void UnmarkedEnums_DoNotCollide()
         {
             var schema = DiscoverValid(@"
 using CycloneDDS.Schema;
-namespace App { public enum Mode { Sim } }
-namespace App.Sim
-{
-    public enum Kept { A }
-    [DdsStruct] public partial struct S { public int X; }
-}");
-            // The module stays for S, so the enum inside it need not go too
-            Assert.Equal(["Kept"], schema.Enums.Select(e => e.Name));
-        }
-
-        [Fact]
-        public void UnusedEnumNamedLikeType_GivesWay()
-        {
-            var schema = DiscoverValid(@"
-using CycloneDDS.Schema;
-namespace App
-{
-    public enum S { A }
-    [DdsStruct] public partial struct s { public int X; }
-}");
+namespace App { public enum Mode { Sim } public enum S { A } }
+namespace App.Sim { [DdsStruct] public partial struct S { public int X; } }
+namespace App { [DdsStruct] public partial struct s { public int X; } }");
             Assert.Empty(schema.Enums);
         }
 
         [Theory]
-        [InlineData("namespace App { public enum Mode { Sim } [DdsStruct] public partial struct U { public Mode M; } } namespace App.Sim { [DdsStruct] public partial struct S { public int X; } }", "App::Sim")]
+        [InlineData("namespace App { [DdsEnum] public enum Mode { Sim } [DdsStruct] public partial struct U { public Mode M; } } namespace App.Sim { [DdsStruct] public partial struct S { public int X; } }", "App::Sim")]
         [InlineData("namespace App { [DdsStruct] public partial struct Sim { public int X; } } namespace App.Sim { [DdsStruct] public partial struct S { public int X; } }", "App::Sim")]
         [InlineData("namespace App { [DdsStruct] public partial struct sim { public int X; } } namespace App.Sim { [DdsStruct] public partial struct S { public int X; } }", "App::")]
         public void ModuleCollisions_AreRejected(string declarations, string expected)
@@ -371,7 +333,7 @@ namespace App
         [Fact]
         public void EnumsInDifferentModules_DoNotCollide()
         {
-            var schema = DiscoverValid("namespace A { public enum Color { None } } namespace B { public enum Mode { None } }");
+            var schema = DiscoverValid("using CycloneDDS.Schema; namespace A { [DdsEnum] public enum Color { None } } namespace B { [DdsEnum] public enum Mode { None } }");
             Assert.Equal(2, schema.Enums.Count);
         }
     }
