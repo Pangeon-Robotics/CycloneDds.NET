@@ -5,6 +5,20 @@ All notable changes to CycloneDDS.NET will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- **DDS enums must be marked `[DdsEnum]`.** Unmarked enums are ignored by code generation,
+  so enums used only inside an application no longer reach the IDL or break the build.
+  Problems with a `[DdsEnum]` are reported at its declaration.
+
+### Fixed
+
+- Unsigned enums with values above IDL's signed range for their bit bound (e.g. a `byte`
+  enum with value 255) produced IDL that idlc rejected. Such values are now declared as the
+  signed value with the same bits, which leaves the wire bytes unchanged.
+
 ## 0.4.0
 
 ### Changed

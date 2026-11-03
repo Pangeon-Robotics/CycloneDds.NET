@@ -20,7 +20,7 @@ using System.Runtime.CompilerServices;
 using CycloneDDS.Schema;
 namespace Gen
 {
-    public enum Color : byte { Red, Blue = 3 }
+    [DdsEnum] public enum Color : byte { Red, Blue = 3 }
     [InlineArray(2)] public struct Two { private double _e; }
 
     [DdsStruct] public partial struct Point { public int X; public string Name; }

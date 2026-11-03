@@ -117,12 +117,13 @@ public partial struct SensorData
 [InlineArray(8)]
 public struct FloatBuffer8 { private float _element0; }
 
+[DdsEnum]
 public enum SensorStatus : byte { Offline, Online, Error }
 ```
 
-Enums used by a `[DdsStruct]` need a member with value 0, because an unset C# enum holds 0 and Cyclone rejects undeclared values.
+Enums a `[DdsStruct]` uses must be marked `[DdsEnum]`; unmarked enums are ignored by code generation, so application-only enums never reach the IDL. A `[DdsEnum]` needs a member with value 0, because an unset C# enum holds 0 and Cyclone rejects undeclared values.
 
-An enum that no `[DdsStruct]` in its own project uses is left out of the IDL, without a diagnostic, when it cannot be expressed in IDL or its names collide with another declaration. This keeps unrelated enums in an application from breaking its build. In a project that only declares enums for others to use, the symptom is a `no [assembly: DdsIdlMapping]` error in the project that uses the enum; using the enum from a `[DdsStruct]` in its own project reports the actual cause.
+IDL has no unsigned enums: enumerator values are signed within the bit bound. An unsigned enum value above that range (e.g. `byte.MaxValue`) is declared in IDL as the signed value with the same bits (`@value(-1)`), so the wire bytes match the C# value. Other DDS implementations reading the IDL see the signed value.
 
 ### Configuration & QoS
 

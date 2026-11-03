@@ -4,8 +4,11 @@ using CycloneDDS.Schema;
 
 namespace CycloneDDS.Runtime.Tests.Shapes
 {
-    public enum Color : byte { Red, Green, Blue = 7 }
+    // Invalid lies above IDL's signed 8-bit range, so it travels as the same bits declared signed
+    [DdsEnum]
+    public enum Color : byte { Red, Green, Blue = 7, Invalid = byte.MaxValue }
 
+    [DdsEnum]
     public enum Wide { None, Small = 1, Large = 100_000 }
 
     [InlineArray(4)]
